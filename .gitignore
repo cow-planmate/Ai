@@ -8,7 +8,7 @@ __pycache__/
 venv/
 ENV/
 env/
-
+ai.env
 # Environment variables
 .env
 .env.*
