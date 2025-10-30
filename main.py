@@ -11,7 +11,7 @@ from app import app
 
 def run_server() -> None:
     """Run the FastAPI application with uvicorn."""
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8010")))
 
 
 def run_in_thread() -> None:
@@ -22,9 +22,9 @@ def run_in_thread() -> None:
     time.sleep(3)
     print("=" * 50)
     print("✅ FastAPI 서버가 성공적으로 실행되었습니다.")
-    print("🌍 로컬 접속 URL: http://localhost:8000")
-    print("📚 API 문서 (Swagger UI): http://localhost:8000/docs")
-    print("📬 POST 엔드포인트: http://localhost:8000/recommendations")
+    print("🌍 로컬 접속 URL: http://localhost:8010")
+    print("📚 API 문서 (Swagger UI): http://localhost:8010/docs")
+    print("📬 POST 엔드포인트: http://localhost:8010/recommendations")
     print("=" * 50)
 
 
