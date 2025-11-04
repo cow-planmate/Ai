@@ -5,41 +5,47 @@ from typing import Any, Dict, Optional
 from app.services.gemini import gemini_model
 
 
-def recommend_outfit_gemini(weather_summary: Dict[str, Any], destination: str, date_str: str) -> Optional[str]:
+# --- [수정] ---
+# 함수가 weather_summary (Dict) 대신 full_weather_prompt (str)를 받도록 수정합니다.
+def recommend_outfit_gemini(full_weather_prompt: str, destination: str, date_str: str) -> Optional[str]:
     """Generate a recommendation using Gemini when available."""
     if gemini_model is None:
         return None
 
+    # [수정] 프롬프트가 전달받은 날씨 요약 문자열을 그대로 사용하도록 변경
     prompt = f"""
-당신은 여행 패션 전문가입니다. 다음 여행 정보를 바탕으로 적절한 옷차림을 추천해주세요.
+당신은 여행 패션 전문가입니다. 다음 여행 정보를 바탕으로 적절한 옷차림을 "종합적"으로 추천해주세요.
 
 📍 여행 정보:
-- 목적지: {destination}
-- 날짜: {date_str}
-- 예상 날씨: {weather_summary['description']}
-- 평균 기온: {weather_summary['temp']}°C (체감 {weather_summary['feels_like']}°C)
-- 습도: {weather_summary['humidity']}%
+{full_weather_prompt}
 
 다음 형식으로 답변해주세요:
-1. 추천 옷차림 (상의, 하의, 겉옷)
-2. 필수 준비물
-3. 여행 팁
+1. 종합 추천 (날씨 요약 및 전반적인 옷차림)
+2. 날짜별 팁 (필요시 간단하게)
+3. 필수 준비물 (예: 우산, 선크림, 핫팩)
 
-답변은 친근하고 실용적으로 작성해주세요.
-"""
+답변은 친근하고 실용적인 한국어 어조로 작성해주세요.
+**매우 중요: 답변에 마크다운 강조문(`**`, `##`)을 절대 사용하지 말고, 답변해주세요.**
+""".strip()
+    
     try:
         response = gemini_model.generate_content(prompt)
         return getattr(response, "text", None)
     except Exception as exc:  # pragma: no cover - external API call
-        print(f"Gemini API 오류: {exc}")
+        # 이 print 문이 Anaconda 로그에 보여야 합니다.
+        print(f"!!! Gemini API 오류 발생: {exc}")
         return None
+# --- [수정 완료] ---
 
 
 def recommend_outfit_rule_based(weather_summary: Dict[str, Any]) -> str:
     """Fallback rule-based recommendation."""
-    temp = weather_summary["temp"]
-    desc = weather_summary["description"]
-    humidity = weather_summary["humidity"]
+    
+    # [방어 코드] rule-based 함수가 'temp', 'description', 'humidity' 키를 안전하게
+    # 가져올 수 있도록 .get()을 사용합니다.
+    temp = weather_summary.get("temp", 15.0) # 키가 없으면 15도(가을)로 간주
+    desc = weather_summary.get("description", "")
+    humidity = weather_summary.get("humidity", 60)
 
     recommendation = {"outfit": "", "items": [], "advice": ""}
 
@@ -91,4 +97,3 @@ def recommend_outfit_rule_based(weather_summary: Dict[str, Any]) -> str:
 💡 여행 팁:
 {recommendation['advice']}
 """.strip()
-
