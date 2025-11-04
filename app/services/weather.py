@@ -9,42 +9,47 @@ from app.config import settings
 
 
 def translate_city_name(city_input: str) -> str:
-    """Convert Korean city names to English equivalents where available."""
+    """
+    "광주광역시 동구", "경기도 광주시", "강원특별자치도 화천군" 같은 입력을
+    OpenWeatherMap이 인식하는 "Gwangju", "Gyeonggi-do", "Gangwon-do" 등으로 변환합니다.
+    """
+    
+    # [수정] 사용자가 제공한 17개 광역 시/도 이미지 기준으로 city_dict를 재구성
+    # 하위 도시(원주, 문경, 화천 등)를 모두 제거하고, 광역 단위만 매핑합니다. (무료 OpenweatherMap api를 사용해서 그렇습니다!)
     city_dict = {
-        # 국내
-        "서울": "Seoul",
-        "부산": "Busan",
-        "인천": "Incheon",
-        "대구": "Daegu",
-        "대전": "Daejeon",
-        "광주": "Gwangju",
-        "울산": "Ulsan",
-        "제주": "Jeju",
-        # 해외
-        "도쿄": "Tokyo",
-        "오사카": "Osaka",
-        "교토": "Kyoto",
-        "후쿠오카": "Fukuoka",
-        "삿포로": "Sapporo",
-        "베이징": "Beijing",
-        "상하이": "Shanghai",
-        "홍콩": "Hong Kong",
-        "타이베이": "Taipei",
-        "방콕": "Bangkok",
-        "싱가포르": "Singapore",
-        "하노이": "Hanoi",
-        "호치민": "Ho Chi Minh City",
-        "뉴욕": "New York",
-        "로스앤젤레스": "Los Angeles",
-        "런던": "London",
-        "파리": "Paris",
-        "로마": "Rome",
-        "바르셀로나": "Barcelona",
-        "시드니": "Sydney",
-        "멜버른": "Melbourne",
+        # 8개 특별/광역시
+        "서울특별시": "Seoul",
+        "부산광역시": "Busan",
+        "대구광역시": "Daegu",
+        "인천광역시": "Incheon",
+        "광주광역시": "Gwangju",
+        "대전광역시": "Daejeon",
+        "울산광역시": "Ulsan",
+        "세종특별자치시": "Sejong",
+        
+        # 9개 도
+        "경기도": "Gyeonggi-do",
+        "강원특별자치도": "Gangwon-do", # "강원"만 쓰면 "수원"과 혼동 가능
+        "충청북도": "Chungcheongbuk-do",
+        "충청남도": "Chungcheongnam-do",
+        "전북특별자치도": "Jeonbuk-do", # (OpenWeatherMap은 Jeollabuk-do를 더 잘 알지만, Jeonbuk-do도 인식함)
+        "전라남도": "Jeollanam-do",
+        "경상북도": "Gyeongsangbuk-do",
+        "경상남도": "Gyeongsangnam-do",
+        "제주특별자치도": "Jeju",
     }
-    return city_dict.get(city_input, city_input)
-
+    
+    # [수정] 
+    # 딕셔너리 키를 순회하며 입력 문자열에 포함되는지 확인합니다.
+    # 이 로직은 `city_dict`가 상위 지역만 포함하므로 안전하게 작동합니다.
+    for kor_city in city_dict:
+        # "강원특별자치도"가 "강원특별자치도 화천군" 안에 포함되는지 확인 -> True
+        if kor_city in city_input:
+            # "Gangwon-do"를 반환
+            return city_dict[kor_city]
+            
+    # 매칭되는 키가 없으면 원본 반환
+    return city_input
 
 def get_weather_forecast(city: str, target_date: datetime) -> Dict[str, Any]:
     """Fetch OpenWeatherMap forecast data for the given city and date."""
@@ -53,8 +58,11 @@ def get_weather_forecast(city: str, target_date: datetime) -> Dict[str, Any]:
     if days_diff < 0:
         return {"error": "과거 날짜의 날씨는 조회할 수 없습니다."}
 
+    # 무료 플랜 5일 예보를 계속 사용
     if days_diff > 4:
+        # 5일이 넘어가면 "alternative": True를 반환하여 routes.py가 계절별 날씨를 반환하도록 함
         return {"error": "무료 API는 5일 이내 예보만 제공합니다.", "alternative": True}
+
 
     if not settings.openweather_api_key:
         return {"error": "OPENWEATHER_API_KEY가 설정되지 않았습니다."}
@@ -82,6 +90,8 @@ def get_weather_forecast(city: str, target_date: datetime) -> Dict[str, Any]:
                             "description": item["weather"][0]["description"],
                             "humidity": item["main"]["humidity"],
                             "wind_speed": item.get("wind", {}).get("speed", 0),
+                            "temp_min": round(item["main"].get("temp_min", item["main"]["temp"])),
+                            "temp_max": round(item["main"].get("temp_max", item["main"]["temp"])),
                         }
                     )
 
@@ -91,6 +101,10 @@ def get_weather_forecast(city: str, target_date: datetime) -> Dict[str, Any]:
                     sum(f["feels_like"] for f in daily_forecasts) / len(daily_forecasts)
                 )
                 avg_humidity = round(sum(f["humidity"] for f in daily_forecasts) / len(daily_forecasts))
+                
+                min_temp_of_day = min(f["temp_min"] for f in daily_forecasts)
+                max_temp_of_day = max(f["temp_max"] for f in daily_forecasts)
+
                 descriptions = [f["description"] for f in daily_forecasts]
                 main_description = max(set(descriptions), key=descriptions.count)
 
@@ -102,12 +116,18 @@ def get_weather_forecast(city: str, target_date: datetime) -> Dict[str, Any]:
                         "humidity": avg_humidity,
                         "description": main_description,
                         "wind_speed": daily_forecasts[0]["wind_speed"],
+                        "temp_min": min_temp_of_day,
+                        "temp_max": max_temp_of_day,
                     },
                 }
 
+            if days_diff <= 4:
+                 return {"error": f"{target_date_str}의 예보 데이터를 찾을 수 없습니다 (API 응답은 정상).", "alternative": True}
+            
             return {"error": "해당 날짜의 예보를 찾을 수 없습니다."}
 
         if response.status_code == 404:
+            # "Gangwon-do"로 변환했는데도 404가 발생한 경우 (OpenWeatherMap이 모르는 도시)
             return {"error": f"도시를 찾을 수 없습니다: {city}"}
 
         return {"error": f"API 오류: {response.status_code}"}
