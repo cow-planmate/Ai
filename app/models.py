@@ -2,6 +2,8 @@
 
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field
+from datetime import date, time
 
 # --- React가 기대하는 새로운 모델 ---
 
@@ -58,3 +60,56 @@ class TravelRequest(BaseModel):
 class TravelResponse(BaseModel):
     original_request: TravelRequest
     recommendations: List[DailyRecommendation]
+
+
+class TimetablePlaceBlockVO(BaseModel):
+    # Java의 VO와 필드 순서 및 타입 일치 (JSON 파싱을 위해 Optional 사용)
+    timetableId: Optional[int] = None
+    timetablePlaceBlockId: Optional[int] = None
+    placeCategoryId: Optional[int] = None
+    placeName: Optional[str] = None
+    placeRating: Optional[float] = None
+    placeAddress: Optional[str] = None
+    placeLink: Optional[str] = None
+    placeId: Optional[str] = None
+    date: Optional[str] = None # Java에서는 LocalDate였으나, DTO에서는 문자열로 처리될 수 있음
+    startTime: Optional[time] = None
+    endTime: Optional[time] = None
+    xLocation: Optional[float] = None
+    yLocation: Optional[float] = None
+    
+class TimetableVO(BaseModel):
+    timetableId: Optional[int] = None
+    date: Optional[date] = None
+    startTime: Optional[time] = None
+    endTime: Optional[time] = None
+    # timeTablePlaceBlocks: List[TimetablePlaceBlockVO] = [] # (선택적)
+
+class WTimetableRequest(BaseModel):
+    timetableVOs: List[TimetableVO] = Field(default_factory=list)
+
+class WPlanRequest(BaseModel):
+    planName: Optional[str] = None
+    departure: Optional[str] = None
+    adultCount: Optional[int] = None
+    childCount: Optional[int] = None
+    transportationCategoryId: Optional[int] = None
+    travelId: Optional[int] = None
+
+# --- Java AI 응답 모델 대체 (ChatBotActionResponse/AIResponse/ActionData) ---
+class ActionData(BaseModel):
+    action: str = Field(..., description="create | update | delete")
+    targetName: str = Field(..., description="plan | timeTable | timeTablePlaceBlock")
+    # target은 동적 JSON 객체이므로 Dict[str, Any]로 정의
+    target: Dict[str, Any]
+
+class ChatBotActionResponse(BaseModel):
+    userMessage: str
+    hasAction: bool
+    action: Optional[ActionData] = None
+
+class AIResponse(BaseModel):
+    """Gemini가 반환해야 하는 최종 JSON 구조"""
+    userMessage: str
+    hasAction: bool
+    action: Optional[ActionData] = None
