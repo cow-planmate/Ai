@@ -14,6 +14,46 @@ def simple_message(message: str) -> ChatBotActionResponse:
     """Action이 없는 단순 메시지 응답을 생성합니다."""
     return ChatBotActionResponse(userMessage=message, hasAction=False, action=None)
 
+
+def clean_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Gemini API 호환성을 위해 스키마에서 불필요한 필드를 재귀적으로 제거합니다."""
+    # keys_to_remove에 "anyOf" 추가
+    keys_to_remove = ["title", "description", "$defs", "anyOf", "default"]
+
+    if isinstance(schema, dict):
+        # 1. 최상위 레벨 필드 제거
+        for key in keys_to_remove:
+            if key in schema:
+                del schema[key]
+
+        # 2. properties 내의 필드 (재귀적 제거)
+        for key, value in schema.items():
+            if isinstance(value, dict) and key == "properties":
+                # properties 딕셔너리 내부를 순회하며 title, description, anyOf 등을 제거
+                for prop_name, prop_schema in value.items():
+                    if isinstance(prop_schema, dict):
+                        # Pydantic이 Optional을 anyOf로 변환하므로, anyOf를 여기서 제거해야 함
+                        if "description" in prop_schema:
+                            del prop_schema["description"]
+                        if "anyOf" in prop_schema:
+                            # anyOf가 제거되면, 그 안에 있던 type: ['null']이 사라지므로,
+                            # Optional 필드를 null 허용 필드로 수동 변환 (선택 사항)
+                            # Pydantic V1/V2에서 nullable 처리가 다르므로, 일단 필드만 제거에 집중
+                            del prop_schema["anyOf"]
+
+                            # 중첩 구조가 있다면 재귀 호출
+                        clean_schema(prop_schema)
+
+            # 다른 일반 딕셔너리 구조에도 재귀 호출
+            elif isinstance(value, dict):
+                clean_schema(value)
+
+            # 리스트 내의 딕셔너리에도 재귀 호출 (예: allOf, oneOf 등)
+            elif isinstance(value, list):
+                for item in value:
+                    clean_schema(item)
+
+    return schema
 # --- 메인 로직: Java Chatbot 요청 처리 ---
 
 def handle_java_chatbot_request(
@@ -40,10 +80,13 @@ def handle_java_chatbot_request(
     try:
         # 2. Gemini API 호출
         # AIResponse 모델의 JSON 스키마를 사용하여 Gemini가 구조화된 JSON을 반환하도록 유도
+        ai_response_schema = AIResponse.model_json_schema()
+        ai_response_schema = clean_schema(ai_response_schema)
+
         response = gemini_model.generate_content(
             full_message,
             generation_config={"response_mime_type": "application/json", 
-                               "response_schema": AIResponse.model_json_schema()}
+                               "response_schema": ai_response_schema} # <--- 수정된 스키마 사용
         )
 
         ai_response_text = getattr(response, "text", None)

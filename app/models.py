@@ -2,7 +2,6 @@
 
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel, Field
-from pydantic import BaseModel, Field
 from datetime import date, time
 
 # --- React가 기대하는 새로운 모델 ---
