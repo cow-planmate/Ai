@@ -91,7 +91,24 @@ def handle_java_chatbot_request(
         # Gemini가 응답 스키마를 따르도록 설정했으므로, 텍스트가 바로 JSON이라고 가정하고 파싱
         try:
             ai_data_dict = json.loads(ai_response_text)
+
+            # --- [추가된 로직: target 필드 강제 파싱] ---
+            if 'action' in ai_data_dict and ai_data_dict['action'] and 'target' in ai_data_dict['action']:
+                target_value = ai_data_dict['action']['target']
+
+                # target 값이 문자열(잘못된 JSON TEXT)인 경우, 다시 파싱 시도
+                if isinstance(target_value, str):
+                    try:
+                        # 문자열을 JSON 객체(dict)로 변환하여 덮어쓰기
+                        ai_data_dict['action']['target'] = json.loads(target_value)
+                        print("ℹ️ target 필드 강제 파싱 성공.")
+                    except json.JSONDecodeError:
+                        # 다시 파싱 실패 시 원본 오류를 남기고 진행
+                        print("⚠️ target 필드 강제 파싱 실패. 원본 문자열 유지.")
+            # ---------------------------------------------
+
             ai_response_data = AIResponse(**ai_data_dict)
+
         except (json.JSONDecodeError, ValueError, Exception) as e:
              print(f"JSON 파싱 실패: {e}\nRaw AI Text: {ai_response_text}")
              # 파싱 실패 시, 텍스트를 단순 메시지로 간주하고 반환
