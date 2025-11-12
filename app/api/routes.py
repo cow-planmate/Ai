@@ -9,7 +9,7 @@ from app.models import (
     ChatBotActionResponse,
 )
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter()
 
