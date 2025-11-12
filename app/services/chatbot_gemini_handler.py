@@ -36,8 +36,8 @@ def handle_java_chatbot_request(
         # AIResponse 모델의 JSON 스키마를 사용하여 Gemini가 구조화된 JSON을 반환하도록 유도
         response = gemini_model.generate_content(
             full_message,
-            config={"response_mime_type": "application/json",
-                    "response_schema": AIResponse.model_json_schema()}
+            generation_config={"response_mime_type": "application/json", 
+                               "response_schema": AIResponse.model_json_schema()}
         )
 
         ai_response_text = getattr(response, "text", None)
