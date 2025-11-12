@@ -20,7 +20,7 @@ def create_app() -> FastAPI:
     # config.py의 allowed_origins 설정을 사용
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.allowed_origins,
+        allow_origins=["https://www.planmate.site"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
