@@ -22,10 +22,13 @@ elif ENV_PATH.exists():  # pragma: no cover - guidance for missing dependency
 
 @dataclass
 class Settings:
-    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "").strip()
     openweather_api_key: str = os.getenv("OPENWEATHER_API_KEY", "").strip()
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "").strip()
+    gemini_api_url: str = os.getenv("GEMINI_API_URL", "").strip() 
+    
     allowed_origins: List[str] = field(
         default_factory=lambda: [
+            "https://www.planmate.site",
             "http://localhost:5173",
             "http://127.0.0.1:5173",
         ]
