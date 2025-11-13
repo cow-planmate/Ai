@@ -139,7 +139,7 @@ def handle_java_chatbot_request(
 
             # 최종 오류 메시지에 raw_target_data를 포함시킵니다.
             detailed_error_message = (
-                f"AI 응답 형식에 문제가 있습니다. 오류: {e}. "
+                f"AI 응답 형식에 문제가 있습니다. 오류: "
                 f"\n\n🚨 원본 Target 데이터 (파싱 전): {raw_target_data}"
             )
             return simple_message(detailed_error_message)
