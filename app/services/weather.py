@@ -32,7 +32,7 @@ def translate_city_name(city_input: str) -> str:
         "강원특별자치도": "Gangwon-do", # "강원"만 쓰면 "수원"과 혼동 가능
         "충청북도": "Chungcheongbuk-do",
         "충청남도": "Chungcheongnam-do",
-        "전북특별자치도": "Jeonbuk-do", # (OpenWeatherMap은 Jeollabuk-do를 더 잘 알지만, Jeonbuk-do도 인식함)
+        "전라북도": "Jeollabuk-do",
         "전라남도": "Jeollanam-do",
         "경상북도": "Gyeongsangbuk-do",
         "경상남도": "Gyeongsangnam-do",
@@ -50,6 +50,8 @@ def translate_city_name(city_input: str) -> str:
             
     # 매칭되는 키가 없으면 원본 반환
     return city_input
+    # --- [수정 완료] ---
+
 
 def get_weather_forecast(city: str, target_date: datetime) -> Dict[str, Any]:
     """Fetch OpenWeatherMap forecast data for the given city and date."""
