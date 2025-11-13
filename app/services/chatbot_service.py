@@ -70,24 +70,36 @@ def handle_java_chatbot_request(
 
         try:
             ai_data_dict = json.loads(ai_response_text)
+        except json.JSONDecodeError as e:
+            print(f"1차 JSON 파싱 실패: {e}\nRaw AI Text: {ai_response_text}")
+            return simple_message(f"AI 응답이 JSON 형식이 아닙니다: {ai_response_text}")
 
-            if 'action' in ai_data_dict and ai_data_dict['action'] and 'target' in ai_data_dict['action']:
-                target_value = ai_data_dict['action']['target']
+            # 타입 강제 변환 로직 (Pydantic 오류 방지)
+        if 'action' in ai_data_dict and ai_data_dict['action'] and 'target' in ai_data_dict['action']:
+            target_value = ai_data_dict['action']['target']
 
-                if isinstance(target_value, str):
-                    try:
-                        ai_data_dict['action']['target'] = json.loads(target_value)
-                        print("ℹ️ target 필드 강제 파싱 성공.")
-                    except json.JSONDecodeError:
-                        print("⚠️ target 필드 강제 파싱 실패. 원본 문자열 유지.")
+            if isinstance(target_value, str):
+                # 중첩된 JSON 파싱 시도
+                try:
+                    ai_data_dict['action']['target'] = json.loads(target_value)
+                except json.JSONDecodeError:
+                    pass  # 파싱 실패 시 원본 문자열 유지
 
+            elif isinstance(target_value, (int, float)):
+                # 숫자일 경우: Pydantic Dictionary 기대를 충족시키기 위해 딕셔너리로 래핑
+                try:
+                    ai_data_dict['action']['target'] = {"value": target_value}
+                except Exception:
+                    pass  # 오류 발생 시 원본 값 유지 (최후의 수단)
+
+            # 2차 Pydantic 유효성 검사 및 데이터 모델화
+        try:
             ai_response_data = AIResponse(**ai_data_dict)
+        except (ValueError, Exception) as e:
+            print(f"Pydantic 유효성 검사 실패: {e}\nProcessed Dict: {ai_data_dict}")
+            return simple_message(f"AI 응답 형식에 문제가 있습니다. 오류: {e}")
 
-        except (json.JSONDecodeError, ValueError, Exception) as e:
-             print(f"JSON 파싱 실패: {e}\nRaw AI Text: {ai_response_text}")
-             return simple_message(f"AI 응답 형식에 문제가 있습니다. 오류: {e}")
-
-
+            # 최종 응답 생성
         if ai_response_data.hasAction and ai_response_data.action:
             return ChatBotActionResponse(
                 userMessage=ai_response_data.userMessage,
