@@ -128,10 +128,21 @@ def handle_java_chatbot_request(
             # 이 오류가 발생하면 아래 except 블록에서 메시지를 반환합니다.
             ai_response_data = AIResponse(**ai_data_dict)
         except (ValueError, Exception) as e:
-            print(f"Pydantic 유효성 검사 실패: {e}\nProcessed Dict: {ai_data_dict}")
-            # 여기서 오류 메시지를 반환합니다. 이 코드는 **유연한 처리에 실패했을 때** 실행됩니다.
-            return simple_message(f"AI 응답 형식에 문제가 있습니다. 오류: {e}")
+            try:
+                # Pydantic 검사 실패 직전의 target 값(아직 문자열일 가능성이 높음)을 가져옵니다.
+                raw_target_data = ai_data_dict.get('action', {}).get('target', 'Target data not found')
+                if isinstance(raw_target_data, dict):
+                    # 만약 딕셔너리로 이미 변환된 상태라면, 다시 JSON 문자열로 변환하여 출력
+                    raw_target_data = json.dumps(raw_target_data)
+            except Exception as inner_e:
+                raw_target_data = f"Error retrieving target: {inner_e}"
 
+            # 최종 오류 메시지에 raw_target_data를 포함시킵니다.
+            detailed_error_message = (
+                f"AI 응답 형식에 문제가 있습니다. 오류: {e}. "
+                f"\n\n🚨 원본 Target 데이터 (파싱 전): {raw_target_data}"
+            )
+            return simple_message(detailed_error_message)
             # 최종 응답 생성
         if ai_response_data.hasAction and ai_response_data.action:
             return ChatBotActionResponse(
