@@ -1,11 +1,9 @@
 """Application factory for the travel outfit recommendation API."""
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.api.routes import router
-
 
 def create_app() -> FastAPI:
     """Build and configure the FastAPI application."""

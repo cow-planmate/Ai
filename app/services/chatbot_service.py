@@ -10,6 +10,33 @@ from app.services.gemini import gemini_model
 def simple_message(message: str) -> ChatBotActionResponse:
     return ChatBotActionResponse(userMessage=message, hasAction=False, action=None)
 
+def robust_json_parse(text: str) -> Union[Dict[str, Any], str]:
+    """
+    JSON 문자열을 안전하게 파싱합니다.
+    파싱 실패 시, 앞뒤 중괄호({})가 누락된 불완전한 JSON을 복구하여 재시도합니다.
+    """
+    if not isinstance(text, str):
+        return text
+
+    try:
+        # 1. 일반 JSON 파싱 시도
+        return json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            # 2. 파싱 실패 시, 앞뒤 공백과 큰따옴표를 제거
+            cleaned_str = text.strip().strip('"')
+
+            # 3. 중괄호({})가 누락된 경우를 가정하여 복구 시도
+            if cleaned_str and not (cleaned_str.startswith('{') and cleaned_str.endswith('}')):
+                # 불완전한 JSON 문자열을 다시 JSON 문자열로 래핑
+                repaired_str = '{' + cleaned_str + '}'
+                return json.loads(repaired_str)
+        except json.JSONDecodeError as inner_e:
+            print(f"⚠️ JSON 문자열 복구 및 파싱 최종 실패. 오류: {inner_e}")
+            pass
+
+    # 최종적으로 파싱에 성공하지 못하면 원본 문자열을 반환
+    return text
 
 def clean_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
     keys_to_remove = ["title", "description", "$defs", "anyOf", "default"]
@@ -79,24 +106,30 @@ def handle_java_chatbot_request(
             target_value = ai_data_dict['action']['target']
 
             if isinstance(target_value, str):
-                # 중첩된 JSON 파싱 시도
-                try:
-                    ai_data_dict['action']['target'] = json.loads(target_value)
-                except json.JSONDecodeError:
-                    pass  # 파싱 실패 시 원본 문자열 유지
+                # 문자열일 경우: JSON 복구 및 파싱을 시도
+                parsed_target = robust_json_parse(target_value)
+
+                if isinstance(parsed_target, dict):
+                    # 성공적으로 딕셔너리로 파싱된 경우, 값을 교체
+                    ai_data_dict['action']['target'] = parsed_target
+                # 실패한 경우 (문자열 그대로 남아있는 경우), Pydantic 에러를 유발하지만,
+                # 파이썬 레벨에서 할 수 있는 최선의 시도는 이미 완료했으므로 그대로 진행
 
             elif isinstance(target_value, (int, float)):
                 # 숫자일 경우: Pydantic Dictionary 기대를 충족시키기 위해 딕셔너리로 래핑
                 try:
                     ai_data_dict['action']['target'] = {"value": target_value}
                 except Exception:
-                    pass  # 오류 발생 시 원본 값 유지 (최후의 수단)
+                    pass
 
             # 2차 Pydantic 유효성 검사 및 데이터 모델화
         try:
+            # 여기서 action.target에 문자열이 남아있으면 Pydantic 오류가 발생하며,
+            # 이 오류가 발생하면 아래 except 블록에서 메시지를 반환합니다.
             ai_response_data = AIResponse(**ai_data_dict)
         except (ValueError, Exception) as e:
             print(f"Pydantic 유효성 검사 실패: {e}\nProcessed Dict: {ai_data_dict}")
+            # 여기서 오류 메시지를 반환합니다. 이 코드는 **유연한 처리에 실패했을 때** 실행됩니다.
             return simple_message(f"AI 응답 형식에 문제가 있습니다. 오류: {e}")
 
             # 최종 응답 생성
