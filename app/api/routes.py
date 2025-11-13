@@ -46,3 +46,6 @@ def chat_generate_action(request: JavaChatbotRequest) -> ChatBotActionResponse:
         request.systemPromptContext,
         request.planContext
     )
+@router.get("/hello")
+def hello_world() -> str:
+    return "hello"
