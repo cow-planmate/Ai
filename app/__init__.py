@@ -21,9 +21,6 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=[
             "https://www.planmate.site",
-            "https://planmate.site",
-            "http://localhost:3000",
-            "http://localhost:5173",
         ],
         allow_credentials=True,
         allow_methods=["*"],
