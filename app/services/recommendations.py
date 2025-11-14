@@ -1,8 +1,12 @@
 """Outfit recommendation helpers."""
 
 from typing import Any, Dict, Optional
+import logging
 
 from app.services.gemini import gemini_model
+
+# logger
+logger = logging.getLogger("uvicorn.error")
 
 
 # --- [수정] ---
@@ -31,11 +35,18 @@ def recommend_outfit_gemini(full_weather_prompt: str, destination: str, date_str
 """.strip()
     
     try:
+        logger.debug("Sending prompt to Gemini (truncated): %s", prompt[:400])
         response = gemini_model.generate_content(prompt)
-        return getattr(response, "text", None)
+        try:
+            resp_text = getattr(response, "text", None)
+        except Exception:
+            # fallback representation
+            resp_text = str(response)
+        logger.debug("Gemini raw response (truncated): %s", (resp_text[:500] if resp_text else None))
+        return resp_text
     except Exception as exc:  # pragma: no cover - external API call
         # 이 print 문이 Anaconda 로그에 보여야 합니다.
-        print(f"!!! Gemini API 오류 발생: {exc}")
+        logger.exception("!!! Gemini API 오류 발생: %s", exc)
         return None
 # --- [수정 완료] ---
 

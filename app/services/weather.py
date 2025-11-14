@@ -1,6 +1,6 @@
 """Weather-related helpers using the OpenWeatherMap API."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import requests
@@ -57,7 +57,91 @@ def get_weather_forecast(city: str, target_date: datetime) -> Dict[str, Any]:
     """Fetch OpenWeatherMap forecast data for the given city and date."""
     days_diff = (target_date.date() - datetime.now().date()).days
 
+    # If target date is in the past, optionally try the historical API
     if days_diff < 0:
+        allow_hist = getattr(settings, "openweather_allow_historical", None)
+        # Also accept env var style boolean string
+        if allow_hist is None:
+            import os
+
+            allow_hist = os.getenv("OPENWEATHER_ALLOW_HISTORICAL", "false").lower() in ("1", "true", "yes")
+
+        if allow_hist and settings.openweather_api_key:
+            # Use Geocoding API to get lat/lon for the city
+            geo_url = f"http://api.openweathermap.org/geo/1.0/direct?q={city}&limit=1&appid={settings.openweather_api_key}"
+            try:
+                geo_resp = requests.get(geo_url, timeout=10)
+                if geo_resp.status_code == 200 and geo_resp.json():
+                    geo = geo_resp.json()[0]
+                    lat = geo.get("lat")
+                    lon = geo.get("lon")
+                    if lat is None or lon is None:
+                        return {"error": "Geocoding 실패: 위도/경도 정보를 찾을 수 없습니다."}
+
+                    # One Call Time Machine endpoint requires a unix timestamp (UTC). Use midday UTC of the target date.
+                    dt_ts = int(datetime(target_date.year, target_date.month, target_date.day, 12, tzinfo=timezone.utc).timestamp())
+                    hist_url = (
+                        f"https://api.openweathermap.org/data/2.5/onecall/timemachine?lat={lat}&lon={lon}&dt={dt_ts}"
+                        f"&appid={settings.openweather_api_key}&units=metric&lang=kr"
+                    )
+                    hist_resp = requests.get(hist_url, timeout=10)
+                    if hist_resp.status_code == 200:
+                        data = hist_resp.json()
+                        # hourly field contains hourly historical datapoints
+                        hourly = data.get("hourly", [])
+                        if not hourly:
+                            return {"error": "히스토리컬 데이터가 없습니다.", "alternative": True}
+
+                        daily_forecasts = []
+                        for item in hourly:
+                            forecast_time = datetime.fromtimestamp(item["dt"], tz=timezone.utc)
+                            daily_forecasts.append(
+                                {
+                                    "time": forecast_time.strftime("%H:%M"),
+                                    "temp": round(item["temp"]),
+                                    "feels_like": round(item.get("feels_like", item.get("temp", 0))),
+                                    "description": item.get("weather", [{}])[0].get("description", ""),
+                                    "humidity": item.get("humidity", 0),
+                                    "wind_speed": item.get("wind_speed", 0),
+                                    "temp_min": round(item.get("temp", 0)),
+                                    "temp_max": round(item.get("temp", 0)),
+                                }
+                            )
+
+                        if daily_forecasts:
+                            avg_temp = round(sum(f["temp"] for f in daily_forecasts) / len(daily_forecasts))
+                            avg_feels_like = round(
+                                sum(f["feels_like"] for f in daily_forecasts) / len(daily_forecasts)
+                            )
+                            avg_humidity = round(sum(f["humidity"] for f in daily_forecasts) / len(daily_forecasts))
+
+                            min_temp_of_day = min(f["temp_min"] for f in daily_forecasts)
+                            max_temp_of_day = max(f["temp_max"] for f in daily_forecasts)
+
+                            descriptions = [f["description"] for f in daily_forecasts]
+                            main_description = max(set(descriptions), key=descriptions.count) if descriptions else ""
+
+                            return {
+                                "forecasts": daily_forecasts,
+                                "summary": {
+                                    "temp": avg_temp,
+                                    "feels_like": avg_feels_like,
+                                    "humidity": avg_humidity,
+                                    "description": main_description,
+                                    "wind_speed": daily_forecasts[0]["wind_speed"],
+                                    "temp_min": min_temp_of_day,
+                                    "temp_max": max_temp_of_day,
+                                },
+                            }
+                    else:
+                        # Historical endpoint may require paid plan or be unavailable
+                        return {"error": f"Historical API 오류: {hist_resp.status_code}", "alternative": True}
+                else:
+                    return {"error": "Geocoding 실패: 도시 정보를 찾을 수 없습니다."}
+            except Exception as exc:
+                return {"error": f"히스토리컬 데이터 조회 실패: {exc}", "alternative": True}
+
+        # Historical not allowed or key missing -> fall back to previous behavior (seasonal/alternative)
         return {"error": "과거 날짜의 날씨는 조회할 수 없습니다."}
 
     # 무료 플랜 5일 예보를 계속 사용

@@ -11,7 +11,7 @@ from app import app
 
 def run_server() -> None:
     """Run the FastAPI application with uvicorn."""
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8010")))
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8010")), log_level="debug")
 
 
 def run_in_thread() -> None:

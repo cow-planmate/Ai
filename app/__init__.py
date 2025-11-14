@@ -16,9 +16,15 @@ def create_app() -> FastAPI:
     )
 
     # config.py의 allowed_origins 설정을 사용
+    # 허용 도메인 목록을 확장: www/비-www, 로컬 개발 포트 포함
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["https://www.planmate.site"],
+        allow_origins=[
+            "https://www.planmate.site",
+            "https://planmate.site",
+            "http://localhost:3000",
+            "http://localhost:5173",
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
