@@ -105,10 +105,10 @@ class ActionData(BaseModel):
 class ChatBotActionResponse(BaseModel):
     userMessage: str
     hasAction: bool
-    action: Optional[ActionData] = None
+    actions: List[ActionData] = Field(default_factory=list)
 
 class AIResponse(BaseModel):
     """Gemini가 반환해야 하는 최종 JSON 구조"""
     userMessage: str
     hasAction: bool
-    action: Optional[ActionData] = None
+    actions: List[ActionData] = Field(default_factory=list)

@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any, Union
+from typing import Optional, Dict, Any, Union, List
 import json
 import re
 
@@ -11,7 +11,7 @@ from app.services.gemini import gemini_model
 
 
 def simple_message(message: str) -> ChatBotActionResponse:
-    return ChatBotActionResponse(userMessage=message, hasAction=False, action=None)
+    return ChatBotActionResponse(userMessage=message, hasAction=False, actions=[])
 
 
 def robust_json_parse(text: str) -> Union[Dict[str, Any], str]:
@@ -52,7 +52,7 @@ def robust_json_parse(text: str) -> Union[Dict[str, Any], str]:
 
 
 def clean_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
-    keys_to_remove = ["title", "description", "$defs", "anyOf", "default"]
+    keys_to_remove = ["title", "description", "$defs", "anyOf", "default", "$ref"]
 
     if isinstance(schema, dict):
         for key in keys_to_remove:
@@ -80,10 +80,10 @@ def clean_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def handle_java_chatbot_request(
-        plan_id: int,
-        message: str,
-        system_prompt_context: str,
-        plan_context: str
+    plan_id: int,
+    message: str,
+    system_prompt_context: str,
+    plan_context: str
 ) -> ChatBotActionResponse:
     full_message = f"{system_prompt_context}\n\n"
     if plan_context:
@@ -121,55 +121,16 @@ def handle_java_chatbot_request(
         ai_data_dict = ai_data_parsed
 
         # Action 객체가 존재하는지 확인
-        if 'action' in ai_data_dict and ai_data_dict['action']:
-            action_dict = ai_data_dict['action']
-            target_value = action_dict.get('target')
+        raw_actions: Any = ai_data_dict.get('actions')
+        if raw_actions is None and 'action' in ai_data_dict:
+            raw_actions = ai_data_dict.get('action')
 
-            # ⭐️⭐️⭐️ 1. Target 필드 누락 방어 로직 (Field required 오류 방지) ⭐️⭐️⭐️
-            if target_value is None and 'targetName' in action_dict:
-                target_payload = {}
-                keys_to_remove = []
+        normalized_actions = _normalize_actions(raw_actions)
+        ai_data_dict['actions'] = normalized_actions
+        ai_data_dict.pop('action', None)
 
-                # 'target'으로 시작하지만 'targetName'이 아닌 필드들을 target_payload로 이동
-                for key, value in action_dict.items():
-                    if key.startswith('target') and key not in ['targetName', 'target']:
-                        target_payload[key] = value
-                        keys_to_remove.append(key)
-
-                # 원본 action 딕셔너리에서 target* 필드들을 제거하고 target 필드에 할당
-                if target_payload:
-                    for key in keys_to_remove:
-                        del action_dict[key]
-                    action_dict['target'] = target_payload
-                    target_value = action_dict['target']
-                    print("✅ ActionData 구조 재구성 성공: target 필드 누락 오류 해결.")
-                else:
-                    # target 필드가 없고 target* 데이터도 없으면 빈 딕셔너리라도 채워넣어 Pydantic 방어
-                    action_dict['target'] = {}
-                    target_value = action_dict['target']
-
-            # --- 2. Target 데이터 타입 유연성 확보 로직 ---
-
-            # 리스트 타입 처리
-            if isinstance(target_value, list):
-                if target_value and (isinstance(target_value[0], str) or isinstance(target_value[0], dict)):
-                    target_value = target_value[0]
-                else:
-                    action_dict['target'] = {"list_data": target_value}
-                    target_value = None
-
-            # 문자열 타입 처리
-            if isinstance(target_value, str):
-                parsed_target = robust_json_parse(target_value)
-
-                if isinstance(parsed_target, dict):
-                    action_dict['target'] = parsed_target
-                else:
-                    action_dict['target'] = {"raw_string_data": parsed_target}
-
-            # 숫자 타입 처리
-            elif isinstance(target_value, (int, float)):
-                action_dict['target'] = {"value": target_value}
+        if ai_data_dict.get('hasAction') and not normalized_actions:
+            ai_data_dict['hasAction'] = False
 
         # 2차 Pydantic 유효성 검사 및 데이터 모델화
         try:
@@ -177,30 +138,98 @@ def handle_java_chatbot_request(
         except (ValueError, Exception) as e:
             print(f"Pydantic 유효성 검사 실패: {e}\nProcessed Dict: {ai_data_dict}")
 
-            raw_target_data = ai_data_dict.get('action', {}).get('target', 'Target data not found')
-            if isinstance(raw_target_data, dict):
-                raw_target_data = json.dumps(raw_target_data)
+            raw_target_data: Any = ai_data_dict.get('actions', [])
+            if isinstance(raw_target_data, list) and raw_target_data:
+                target_sample = raw_target_data[0].get('target') if isinstance(raw_target_data[0], dict) else raw_target_data[0]
+            else:
+                target_sample = 'Target data not found'
+            if isinstance(target_sample, dict):
+                target_sample = json.dumps(target_sample)
 
             detailed_error_message = (
                 f"AI 응답 형식에 문제가 있습니다. 오류: {e}. "
-                f"\n\n🚨 원본 Target 데이터 (파싱 전): {raw_target_data}"
+                f"\n\n🚨 원본 Target 데이터 (파싱 전): {target_sample}"
             )
             return simple_message(detailed_error_message)
 
         # 최종 응답 생성
-        if ai_response_data.hasAction and ai_response_data.action:
+        if ai_response_data.hasAction and ai_response_data.actions:
             return ChatBotActionResponse(
                 userMessage=ai_response_data.userMessage,
                 hasAction=True,
-                action=ai_response_data.action
+                actions=ai_response_data.actions
             )
         else:
             return ChatBotActionResponse(
                 userMessage=ai_response_data.userMessage,
                 hasAction=False,
-                action=None
+                actions=[]
             )
 
     except Exception as e:
         print(f"!!! Gemini API 호출 오류: {e}")
         return simple_message(f"AI 챗봇 서비스 호출 중 오류 발생: {e}")
+
+
+def _normalize_actions(raw_actions: Any) -> List[Dict[str, Any]]:
+    """Ensure actions are always a list of dicts with normalized target payloads."""
+    if raw_actions is None:
+        return []
+
+    actions_list = raw_actions if isinstance(raw_actions, list) else [raw_actions]
+    normalized: List[Dict[str, Any]] = []
+
+    for entry in actions_list:
+        if entry is None:
+            continue
+        if isinstance(entry, list):
+            entry = entry[0] if entry else None
+        if not isinstance(entry, dict):
+            print(f"⚠️ 무시된 action 엔트리 (dict 아님): {entry}")
+            continue
+
+        action_dict = entry
+        target_value = action_dict.get('target')
+
+        # target 필드가 누락된 경우 target* 프리픽스 필드를 모아서 복구
+        if target_value is None and 'targetName' in action_dict:
+            target_payload = {}
+            keys_to_remove = []
+            for key, value in action_dict.items():
+                if key.startswith('target') and key not in ('target', 'targetName'):
+                    target_payload[key] = value
+                    keys_to_remove.append(key)
+
+            if target_payload:
+                for key in keys_to_remove:
+                    del action_dict[key]
+                action_dict['target'] = target_payload
+                target_value = target_payload
+            else:
+                action_dict['target'] = {}
+                target_value = action_dict['target']
+
+        # 타입별 방어 로직
+        if isinstance(target_value, list):
+            if target_value:
+                first = target_value[0]
+                if isinstance(first, dict):
+                    action_dict['target'] = first
+                elif isinstance(first, str):
+                    parsed = robust_json_parse(first)
+                    action_dict['target'] = parsed if isinstance(parsed, dict) else {'raw_string_data': parsed}
+                else:
+                    action_dict['target'] = {'list_data': target_value}
+            else:
+                action_dict['target'] = {}
+        elif isinstance(target_value, str):
+            parsed_target = robust_json_parse(target_value)
+            action_dict['target'] = parsed_target if isinstance(parsed_target, dict) else {'raw_string_data': parsed_target}
+        elif isinstance(target_value, (int, float)):
+            action_dict['target'] = {'value': target_value}
+        elif target_value is None:
+            action_dict['target'] = {}
+
+        normalized.append(action_dict)
+
+    return normalized
