@@ -1,84 +1,112 @@
+<<<<<<< HEAD
+from app.services.search_service import (
+    search_and_create_place_block,
+    search_multiple_place_blocks
+)
+from app.models import ChatBotActionResponse, ActionData
+from app.services.gemini import gemini_model
+from datetime import datetime, timedelta
+=======
 from typing import Optional, Dict, Any, Union, List
+>>>>>>> 10e020d05e65e7107e0ea96677d9f43306d4fc75
 import json
 import re
 
-# app.models에서 필요한 모델들을 임포트한다고 가정
-from app.models import (
-    ChatBotActionResponse,
-    AIResponse,
-)
-from app.services.gemini import gemini_model
 
+def handle_java_chatbot_request(planId, message, systemPromptContext, planContext, previousPrompts=None):
 
+<<<<<<< HEAD
+    # 🔹 1) Prompt 조립
+    full_prompt = systemPromptContext + "\n\n"
+=======
 def simple_message(message: str) -> ChatBotActionResponse:
     return ChatBotActionResponse(userMessage=message, hasAction=False, actions=[])
+>>>>>>> 10e020d05e65e7107e0ea96677d9f43306d4fc75
 
+    if previousPrompts:
+        full_prompt += "### 이전 대화\n"
+        for p in previousPrompts:
+            full_prompt += f"User: {p['user']}\nAI: {p['ai']}\n"
+        full_prompt += "\n"
 
-def robust_json_parse(text: str) -> Union[Dict[str, Any], str]:
-    """
-    JSON 문자열을 안전하게 파싱합니다. 파싱 실패 시, 깨진 JSON을 복구하여 재시도하고 상세 로그를 출력합니다.
-    """
-    if not isinstance(text, str):
-        return text
+    full_prompt += f"현재 계획 정보:\n{json.dumps(planContext, ensure_ascii=False)}\n\n"
 
-    try:
-        # 1. 일반 JSON 파싱 시도
-        return json.loads(text)
-    except json.JSONDecodeError as initial_e:
-        print(f"⚠️ JSON 파싱 실패 (1차): {initial_e}. 입력 문자열: '{text}'")
+    # 🔹 사용자 메시지에서 "N일차" 패턴을 찾아서 timeTableId 힌트 추가
+    day_match = re.search(r'(\d+)일차', message)
+    if day_match:
+        day_num = int(day_match.group(1))
+        timeTables = planContext.get("TimeTables", [])
+        if 0 < day_num <= len(timeTables):
+            timeTableId = timeTables[day_num - 1].get("timeTableId")
+            full_prompt += f"힌트: 사용자가 '{day_num}일차'를 언급했습니다. 해당 timeTableId는 {timeTableId}입니다.\n\n"
 
-        # 비표준 JSON 오류 유형 확인 (로그 강화)
-        if "property name enclosed in double quotes" in str(initial_e):
-            print("🚨 오류 유형: 키 이름에 큰따옴표가 누락된 비표준 JSON입니다.")
+    full_prompt += f"사용자 메시지: {message}\n"
 
-        try:
-            # 2. 파싱 실패 시, 앞뒤 공백과 큰따옴표를 제거
-            cleaned_str = text.strip().strip('"')
+    # 🔹 2) Gemini Tools 정의
+    tools = [search_and_create_place_block, search_multiple_place_blocks]
 
-            # 3. 중괄호({})가 누락된 경우를 가정하여 복구 시도
-            if cleaned_str and not (cleaned_str.startswith('{') and cleaned_str.endswith('}')):
-                repaired_str = '{' + cleaned_str + '}'
-                return json.loads(repaired_str)
-            else:
-                repaired_str = text
-                raise json.JSONDecodeError("Manual repair failed or not needed.", repaired_str, 0)
+    # 🔹 3) Gemini 요청
+    generation_config = {
+        "temperature": 0.7,
+        "top_p": 0.95,
+        "top_k": 40,
+        "max_output_tokens": 8192,
+    }
 
-        except json.JSONDecodeError as inner_e:
-            print(
-                f"⚠️ JSON 문자열 복구 및 파싱 최종 실패. 오류: {inner_e}. 복구 시도 문자열: '{repaired_str if 'repaired_str' in locals() else cleaned_str}'")
-            pass
+    response = gemini_model.generate_content(
+        full_prompt,
+        tools=tools,
+        generation_config=generation_config
+    )
 
-    return text
+    actions = []
 
+    # =========================================================
+    # 4) Gemini Flash 2.5 방식 function_call 파싱
+    # =========================================================
+    for cand in response.candidates:
+        content = cand.content
+        print(content)
 
+<<<<<<< HEAD
+        if not content or not hasattr(content, "parts"):
+            continue
+=======
 def clean_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
     keys_to_remove = ["title", "description", "$defs", "anyOf", "default", "$ref"]
+>>>>>>> 10e020d05e65e7107e0ea96677d9f43306d4fc75
 
-    if isinstance(schema, dict):
-        for key in keys_to_remove:
-            if key in schema:
-                del schema[key]
+        for part in content.parts:
+            # function_call이 있고 None이 아닌지 확인
+            if not hasattr(part, "function_call") or part.function_call is None:
+                continue
 
-        for key, value in schema.items():
-            if isinstance(value, dict) and key == "properties":
-                for prop_name, prop_schema in value.items():
-                    if isinstance(prop_schema, dict):
-                        if "description" in prop_schema:
-                            del prop_schema["description"]
-                        if "anyOf" in prop_schema:
-                            del prop_schema["anyOf"]
-                        clean_schema(prop_schema)
+            # function_call의 name이 있는지 확인
+            if not hasattr(part.function_call, "name") or not part.function_call.name:
+                continue
 
-            elif isinstance(value, dict):
-                clean_schema(value)
+            fn_name = part.function_call.name
+            args = dict(part.function_call.args) if part.function_call.args else {}
 
-            elif isinstance(value, list):
-                for item in value:
-                    clean_schema(item)
+            # planContext를 올바르게 설정 (Gemini가 잘못 채운 경우 덮어쓰기)
+            args["planContext"] = planContext
 
-    return schema
+            # timeTableId를 int로 변환 (Gemini가 float로 보내는 경우 대비)
+            if "timeTableId" in args and isinstance(args["timeTableId"], float):
+                args["timeTableId"] = int(args["timeTableId"])
 
+            # ===== 단일 검색 =====
+            if fn_name == "search_and_create_place_block":
+                block = search_and_create_place_block(**args)
 
+<<<<<<< HEAD
+                if "error" in block:
+                    return ChatBotActionResponse(
+                        userMessage="죄송합니다. 요청하신 장소를 찾을 수 없어요. Google Places API 오류가 발생했거나 검색 결과가 없습니다.",
+                        hasAction=False,
+                        actions=[]
+                    )
+=======
 def handle_java_chatbot_request(
     plan_id: int,
     message: str,
@@ -88,31 +116,67 @@ def handle_java_chatbot_request(
     full_message = f"{system_prompt_context}\n\n"
     if plan_context:
         full_message += f"현재 계획 정보:\n{plan_context}\n\n"
+>>>>>>> 10e020d05e65e7107e0ea96677d9f43306d4fc75
 
-    full_message += f"사용자 메시지: {message}\n"
-    full_message += f"현재 계획 ID: {plan_id}"
+                actions.append(ActionData(
+                    action="create",
+                    targetName="timeTablePlaceBlock",
+                    target=block
+                ))
 
-    if gemini_model is None:
-        return simple_message("Gemini 모델이 설정되지 않았습니다. AI 서비스를 사용할 수 없습니다.")
+            # ===== 다중 검색 =====
+            elif fn_name == "search_multiple_place_blocks":
+                blocks = search_multiple_place_blocks(**args)
 
-    try:
-        ai_response_schema = AIResponse.model_json_schema()
-        ai_response_schema = clean_schema(ai_response_schema)
+                if len(blocks) == 0:
+                    return ChatBotActionResponse(
+                        userMessage="죄송합니다. 요청하신 장소를 찾을 수 없어요. Google Places API 오류가 발생했거나 검색 결과가 없습니다.",
+                        hasAction=False,
+                        actions=[]
+                    )
 
-        # Gemini API 호출
-        response = gemini_model.generate_content(
-            full_message,
-            generation_config={"response_mime_type": "application/json",
-                               "response_schema": ai_response_schema}
+                for b in blocks:
+                    actions.append(ActionData(
+                        action="create",
+                        targetName="timeTablePlaceBlock",
+                        target=b
+                    ))
+
+    # =========================================================
+    # 5) function_call이 있었으면 ActionResponse 반환
+    # =========================================================
+    if len(actions) > 0:
+        # 성공 메시지 생성
+        place_names = [action.target.get("placeName", "장소") for action in actions if hasattr(action, 'target')]
+        if len(place_names) > 0:
+            message = f"{', '.join(place_names[:3])}{'...' if len(place_names) > 3 else ''} 일정을 추가했어요!"
+        else:
+            message = "요청하신 장소들을 일정에 추가했어요."
+
+        return ChatBotActionResponse(
+            userMessage=message,
+            hasAction=True,
+            actions=actions
         )
 
-        ai_response_text = getattr(response, "text", None)
-        if not ai_response_text:
-            return simple_message("AI 응답을 받지 못했습니다.")
+    # =========================================================
+    # 6) function_call이 없을 경우 → LLM이 JSON 응답을 직접 생성했을 때
+    # =========================================================
+    try:
+        raw = response.text
 
-        # 1차 JSON 파싱 강화: 전체 응답에 robust_json_parse 적용
-        ai_data_parsed = robust_json_parse(ai_response_text)
+        # ```json ``` 코드 블록 제거
+        if raw.startswith("```json"):
+            raw = raw[7:]
+        if raw.startswith("```"):
+            raw = raw[3:]
+        if raw.endswith("```"):
+            raw = raw[:-3]
 
+<<<<<<< HEAD
+        raw = raw.strip()
+        data = json.loads(raw)
+=======
         if not isinstance(ai_data_parsed, dict):
             # 전체 응답이 딕셔너리로 파싱되지 않았을 경우 (가장 심각한 오류)
             print(f"1차 JSON 파싱 실패 (전체 응답): 최종 파싱 실패. 원본: {ai_response_text}")
@@ -165,8 +229,34 @@ def handle_java_chatbot_request(
                 hasAction=False,
                 actions=[]
             )
+>>>>>>> 10e020d05e65e7107e0ea96677d9f43306d4fc75
 
+        return ChatBotActionResponse(
+            userMessage=data.get("userMessage", ""),
+            hasAction=data.get("hasAction", False),
+            actions=data.get("actions", [])
+        )
     except Exception as e:
+<<<<<<< HEAD
+        # JSON 파싱 실패 시, 일반 텍스트 응답으로 처리
+        try:
+            text_response = response.text.strip()
+            if text_response:
+                return ChatBotActionResponse(
+                    userMessage=text_response,
+                    hasAction=False,
+                    actions=[]
+                )
+        except:
+            pass
+
+        # 완전히 실패한 경우
+        return ChatBotActionResponse(
+            userMessage="죄송합니다. 요청을 처리하는 중 오류가 발생했습니다.",
+            hasAction=False,
+            actions=[]
+        )
+=======
         print(f"!!! Gemini API 호출 오류: {e}")
         return simple_message(f"AI 챗봇 서비스 호출 중 오류 발생: {e}")
 
@@ -233,3 +323,4 @@ def _normalize_actions(raw_actions: Any) -> List[Dict[str, Any]]:
         normalized.append(action_dict)
 
     return normalized
+>>>>>>> 10e020d05e65e7107e0ea96677d9f43306d4fc75

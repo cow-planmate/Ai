@@ -6,7 +6,7 @@ from app.services.chatbot_service import handle_java_chatbot_request
 from app.models import (
     WeatherRecommendationRequest,
     WeatherRecommendationResponse,
-    ChatBotActionResponse,
+    ChatBotActionResponse, ChatBotRequest,
 )
 from typing import Optional
 from pydantic import BaseModel, Field
@@ -27,15 +27,9 @@ def get_weather_recommendations(
     return generate_recommendations(request)
 
 
-# 2. 챗봇 엔드포인트 (ChatRequest 모델을 여기에 정의)
-class JavaChatbotRequest(BaseModel):
-    planId: int = Field(..., description="여행 계획 ID")
-    message: str = Field(..., description="사용자 메시지")
-    systemPromptContext: str = Field(..., description="Java에서 생성한 시스템 프롬프트 컨텍스트 (계획 데이터 포함)")
-    planContext: str = Field(..., description="Java에서 생성한 계획 컨텍스트 (계획 데이터 요약)")
-    
+# 2. 챗봇 엔드포인트
 @router.post("/api/chatbot/generate", response_model=ChatBotActionResponse)
-def chat_generate_action(request: JavaChatbotRequest) -> ChatBotActionResponse:
+def chat_generate_action(request: ChatBotRequest) -> ChatBotActionResponse:
     """
     Java 서버로부터 컨텍스트와 메시지를 받아 Gemini를 호출하고,
     처리된 ChatBotActionResponse를 Java에 반환합니다.

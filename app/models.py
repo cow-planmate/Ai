@@ -51,15 +51,6 @@ class DailyRecommendation(BaseModel):
     recommendation: str
     error: Optional[str] = None
 
-class TravelRequest(BaseModel):
-    destination: str
-    travel_date: str
-    duration: int
-
-class TravelResponse(BaseModel):
-    original_request: TravelRequest
-    recommendations: List[DailyRecommendation]
-
 
 class TimetablePlaceBlockVO(BaseModel):
     # Java의 VO와 필드 순서 및 타입 일치 (JSON 파싱을 위해 Optional 사용)
@@ -84,22 +75,16 @@ class TimetableVO(BaseModel):
     endTime: Optional[time] = None
     # timeTablePlaceBlocks: List[TimetablePlaceBlockVO] = [] # (선택적)
 
-class WTimetableRequest(BaseModel):
-    timetableVOs: List[TimetableVO] = Field(default_factory=list)
-
-class WPlanRequest(BaseModel):
-    planName: Optional[str] = None
-    departure: Optional[str] = None
-    adultCount: Optional[int] = None
-    childCount: Optional[int] = None
-    transportationCategoryId: Optional[int] = None
-    travelId: Optional[int] = None
-
 # --- Java AI 응답 모델 대체 (ChatBotActionResponse/AIResponse/ActionData) ---
+class ChatBotRequest(BaseModel):
+    planId: int
+    message: str
+    systemPromptContext: str
+    planContext: dict[str, Any]
+
 class ActionData(BaseModel):
-    action: str = Field(..., description="create | update | delete")
-    targetName: str = Field(..., description="plan | timeTable | timeTablePlaceBlock")
-    # target은 동적 JSON 객체이므로 Dict[str, Any]로 정의
+    action: str               # create | update | delete
+    targetName: str           # plan | timeTable | timeTablePlaceBlock
     target: Dict[str, Any]
 
 class ChatBotActionResponse(BaseModel):

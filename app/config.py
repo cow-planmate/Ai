@@ -23,6 +23,7 @@ elif ENV_PATH.exists():  # pragma: no cover - guidance for missing dependency
 @dataclass
 class Settings:
     openweather_api_key: str = os.getenv("OPENWEATHER_API_KEY", "").strip()
+    google_places_api_key: str = os.getenv("GOOGLE_PLACES_API_KEY", "").strip()
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "").strip()
     gemini_api_url: str = os.getenv("GEMINI_API_URL", "").strip() 
     
