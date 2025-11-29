@@ -1,15 +1,16 @@
 """Route definitions for the travel outfit recommendation API."""
 
 from fastapi import APIRouter
+from app.services.price_service import predict_price_service
 from app.services.recommendation_service import generate_recommendations 
 from app.services.chatbot_service import handle_java_chatbot_request
 from app.models import (
+    PricePredictionRequest,
+    PricePredictionResponse,
     WeatherRecommendationRequest,
     WeatherRecommendationResponse,
     ChatBotActionResponse, ChatBotRequest,
 )
-from typing import Optional
-from pydantic import BaseModel, Field
 
 router = APIRouter()
 
@@ -40,6 +41,10 @@ def chat_generate_action(request: ChatBotRequest) -> ChatBotActionResponse:
         request.systemPromptContext,
         request.planContext
     )
-@router.get("/hello")
-def hello_world() -> str:
-    return "hello"
+
+@router.post("/price", response_model=PricePredictionResponse)
+def predict_price(request: PricePredictionRequest) -> PricePredictionResponse: 
+    """
+    주어진 입력 데이터(식당, 숙소, 인원수)를 기반으로 1인당 및 총 여행 경비를 예측합니다.
+    """
+    return predict_price_service(request)
