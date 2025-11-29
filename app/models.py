@@ -141,12 +141,16 @@ class FoodCostDetail(BaseModel):
     pricePerPerson: int
     totalPrice: int
     menuExamples: List[str] = []
+    # Optional human-readable short description for the place (AI-generated)
+    placeDescription: Optional[str] = None
 
 class AccommodationCostDetail(BaseModel):
     placeName: str
     roomType: str
     priceRange: CostRange
     pricePerPerson: CostRange
+    # Optional human-readable short description for the place (AI-generated)
+    placeDescription: Optional[str] = None
 
 # 날짜별 요약
 class DailyCostSummary(BaseModel):
@@ -176,3 +180,5 @@ class TripTotalSummary(BaseModel):
 class PricePredictionResponse(BaseModel):
     dailyCosts: List[DailyCostSummary]
     tripSummary: TripTotalSummary
+    # Optional HTML-ready rendering for direct display to the user (non-JSON)
+    renderHtml: Optional[str] = None
