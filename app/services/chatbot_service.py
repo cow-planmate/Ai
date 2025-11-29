@@ -2,6 +2,7 @@ from app.services.search_service import (
     search_and_create_place_block,
     search_multiple_place_blocks
 )
+from app.services.auto_schedule import create_auto_schedule
 from app.models import ChatBotActionResponse, ActionData
 from app.services.gemini import gemini_model
 from datetime import datetime, timedelta
@@ -10,6 +11,82 @@ import re
 
 
 def handle_java_chatbot_request(planId, message, systemPromptContext, planContext, previousPrompts=None):
+
+    # 🔹 0) "N박M일 일정 생성해줘" 패턴 감지 (자동 일정 생성)
+    auto_schedule_match = re.search(r'(\d+)박\s*(\d+)일.*?(?:일정|여행|생성)', message)
+    if auto_schedule_match:
+        nights = int(auto_schedule_match.group(1))
+        days = int(auto_schedule_match.group(2))
+
+        # 목적지 추출
+        destination = planContext.get("TravelName", "서울")
+
+        # 기존 TimeTables 개수 확인
+        timeTables = planContext.get("TimeTables", [])
+        existing_days = len(timeTables)
+
+        # 시작 날짜 계산
+        if existing_days > 0:
+            # 첫 번째 TimeTable의 날짜 사용
+            first_date = timeTables[0].get("date")
+            if first_date:
+                if isinstance(first_date, str):
+                    start_date_obj = datetime.strptime(first_date, "%Y-%m-%d").date()
+                else:
+                    # list 형식 [2025, 1, 1]
+                    start_date_obj = datetime(first_date[0], first_date[1], first_date[2]).date()
+                start_date = start_date_obj.strftime("%Y-%m-%d")
+            else:
+                start_date = datetime.now().strftime("%Y-%m-%d")
+        else:
+            start_date = datetime.now().strftime("%Y-%m-%d")
+
+        print(f"[AUTO_SCHEDULE] {nights}박{days}일 자동 일정 생성 시작: {destination}, {start_date}")
+        print(f"[AUTO_SCHEDULE] 기존 일정: {existing_days}일차, 요청: {days}일차")
+
+        # 자동 일정 생성 (기존 일정 고려)
+        result = create_auto_schedule(
+            days=days,
+            start_date=start_date,
+            planContext=planContext,
+            destination=destination
+        )
+
+        # 기존 일차가 있으면 TimeTable 생성은 필요한 일차만
+        timeTable_actions = []
+        if days > existing_days:
+            # 부족한 일차만 생성 (예: 기존 2일차, 요청 3일차 → 3일차만 생성)
+            for i in range(existing_days, days):
+                tt = result["timeTables"][i]
+                timeTable_actions.append(ActionData(
+                    action="create",
+                    targetName="timeTable",
+                    target=tt["target"]
+                ))
+            print(f"[AUTO_SCHEDULE] {days - existing_days}개 일차 추가 생성")
+
+        # PlaceBlock 생성 액션 (모든 일차의 빈 시간에 추가)
+        placeBlock_actions = []
+        for pb in result["placeBlocks"]:
+            placeBlock_actions.append(ActionData(
+                action="create",
+                targetName="timeTablePlaceBlock",
+                target=pb
+            ))
+
+        # 모든 액션 합치기
+        all_actions = timeTable_actions + placeBlock_actions
+
+        if existing_days > 0:
+            user_message = f"{nights}박{days}일 {destination} 여행 일정을 완성했어요! 기존 일정에 {len(result['placeBlocks'])}개의 장소를 추가했습니다."
+        else:
+            user_message = f"{nights}박{days}일 {destination} 여행 일정을 만들었어요! 총 {len(result['placeBlocks'])}개의 장소를 추가했습니다."
+
+        return ChatBotActionResponse(
+            userMessage=user_message,
+            hasAction=True,
+            actions=all_actions
+        )
 
     # 🔹 1) Prompt 조립
     full_prompt = systemPromptContext + "\n\n"

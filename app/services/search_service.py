@@ -1,6 +1,6 @@
 # app/services/search_service.py
 
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, date as date_type
 from typing import List, Dict, Any, Tuple, Optional
 
 import requests
@@ -11,6 +11,14 @@ from app.config import settings
 DAY_START = time(9, 0, 0)
 DAY_END = time(21, 0, 0)
 
+# 자동 일정 생성 시간대 정의
+AUTO_SCHEDULE_TIMES = {
+    "morning": {"start": time(9, 0, 0), "end": time(11, 0, 0), "type": "관광지"},
+    "lunch": {"start": time(12, 0, 0), "end": time(14, 0, 0), "type": "맛집"},
+    "dinner": {"start": time(18, 0, 0), "end": time(20, 0, 0), "type": "맛집"},
+    "accommodation": {"start": time(21, 0, 0), "end": time(9, 0, 0), "type": "숙소"},
+}
+
 
 def parse_blocks_from_plan(planContext: dict) -> List[Dict[str, Any]]:
     """
@@ -18,6 +26,85 @@ def parse_blocks_from_plan(planContext: dict) -> List[Dict[str, Any]]:
     없으면 빈 리스트.
     """
     return planContext.get("TimeTablePlaceBlocks", []) or []
+
+
+def get_destination_location(destination: str) -> Optional[str]:
+    """
+    목적지 이름으로 위치 좌표를 검색합니다.
+    Google Geocoding API 또는 Places API를 사용하여 목적지의 중심 좌표를 가져옵니다.
+
+    Args:
+        destination: 목적지 이름 (예: "서울", "부산", "제주도")
+
+    Returns:
+        "latitude,longitude" 형식의 문자열 또는 None
+    """
+    if not destination:
+        return None
+
+    try:
+        # Google Places API Text Search로 목적지 검색
+        url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+        params = {
+            "query": destination,
+            "key": settings.google_places_api_key,
+            "language": "ko",
+        }
+
+        r = requests.get(url, params=params, timeout=5)
+        data = r.json()
+
+        if data.get("status") == "OK" and data.get("results"):
+            result = data["results"][0]
+            lat = result["geometry"]["location"]["lat"]
+            lng = result["geometry"]["location"]["lng"]
+            print(f"[LOCATION] 목적지 '{destination}' 위치: {lat},{lng}")
+            return f"{lat},{lng}"
+
+    except Exception as e:
+        print(f"[ERROR] 목적지 위치 검색 실패: {e}")
+
+    return None
+
+
+def get_location_from_plan(planContext: dict, timeTableId: int) -> Optional[str]:
+    """
+    planContext에서 해당 timeTableId의 기존 장소 블록 중 하나의 위치를 가져온다.
+    같은 날짜(timeTableId)의 장소들이 여러 개 있을 경우 첫 번째 장소의 위치를 반환.
+    없으면 전체 블록 중 첫 번째 장소의 위치를 반환.
+    그마저도 없으면 TravelName(목적지)으로 위치를 검색합니다.
+
+    Returns:
+        "latitude,longitude" 형식의 문자열 또는 None
+    """
+    blocks = parse_blocks_from_plan(planContext)
+
+    # 1. 같은 timeTableId의 블록 찾기
+    if blocks:
+        same_day_blocks = [b for b in blocks if b.get("timeTableId") == timeTableId]
+
+        # 2. 같은 날짜의 블록이 있으면 그 중 첫 번째 위치 사용
+        if same_day_blocks:
+            for block in same_day_blocks:
+                y_loc = block.get("yLocation")
+                x_loc = block.get("xLocation")
+                if y_loc is not None and x_loc is not None:
+                    return f"{y_loc},{x_loc}"
+
+        # 3. 같은 날짜의 블록이 없으면 전체 블록 중 첫 번째 위치 사용 (여행지 근처일 가능성 높음)
+        for block in blocks:
+            y_loc = block.get("yLocation")
+            x_loc = block.get("xLocation")
+            if y_loc is not None and x_loc is not None:
+                return f"{y_loc},{x_loc}"
+
+    # 4. 블록이 하나도 없으면 TravelName(목적지)으로 위치 검색
+    travel_name = planContext.get("TravelName")
+    if travel_name:
+        print(f"[SEARCH] 기존 장소 블록이 없어서 목적지 '{travel_name}'로 위치 검색")
+        return get_destination_location(travel_name)
+
+    return None
 
 
 def _parse_time(t) -> time:
@@ -124,10 +211,16 @@ def calculate_end_time(start_time_str: str, duration_minutes: int = 90) -> str:
     return end_dt.strftime("%H:%M:%S")
 
 
-def call_google_places(query: str) -> Optional[Dict[str, Any]]:
+def call_google_places(query: str, location: Optional[str] = None, radius: int = 5000, result_index: int = 0) -> Optional[Dict[str, Any]]:
     """
     Google Places Text Search API 호출.
     결과 없으면 None.
+
+    Args:
+        query: 검색 키워드
+        location: 중심 좌표 "latitude,longitude" 형식 (예: "37.5665,126.9780")
+        radius: 검색 반경 (미터 단위, 기본값: 5km)
+        result_index: 결과 리스트에서 가져올 인덱스 (0부터 시작, 기본값: 0)
     """
     url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
     params = {
@@ -135,6 +228,12 @@ def call_google_places(query: str) -> Optional[Dict[str, Any]]:
         "key": settings.google_places_api_key,
         "language": "ko",
     }
+
+    # 위치 기반 검색 추가
+    if location:
+        params["location"] = location
+        params["radius"] = radius
+        print(f"[SEARCH] 위치 기반 검색: {location}, 반경 {radius}m")
 
     try:
         r = requests.get(url, params=params, timeout=5)
@@ -147,7 +246,11 @@ def call_google_places(query: str) -> Optional[Dict[str, Any]]:
         if not results:
             return None
 
-        item = results[0]
+        # result_index가 범위를 벗어나면 마지막 결과 사용
+        if result_index >= len(results):
+            result_index = len(results) - 1
+
+        item = results[result_index]
 
         place_data = {
             "placeName": item.get("name"),
@@ -159,7 +262,7 @@ def call_google_places(query: str) -> Optional[Dict[str, Any]]:
             "placeLink": f"https://www.google.com/maps/place/?q=place_id:{item['place_id']}",
         }
 
-        print(f"[SEARCH] 장소 찾음: {place_data['placeName']}")
+        print(f"[SEARCH] 장소 찾음 (결과 {result_index+1}번째): {place_data['placeName']}")
 
         return place_data
     except Exception:
@@ -210,7 +313,12 @@ def search_and_create_place_block(
     """
 
     existing_blocks = parse_blocks_from_plan(planContext)
-    google_place = call_google_places(query)
+
+    # planContext에서 위치 정보 가져오기
+    location = get_location_from_plan(planContext, timeTableId)
+
+    # 위치 기반 검색 수행
+    google_place = call_google_places(query, location=location)
 
     if google_place is None:
         return {"error": "NO_PLACE_FOUND"}
@@ -266,6 +374,9 @@ def search_multiple_place_blocks(
     existing_blocks = parse_blocks_from_plan(planContext)
     blocks: List[Dict[str, Any]] = []
 
+    # planContext에서 위치 정보 가져오기
+    location = get_location_from_plan(planContext, timeTableId)
+
     # 첫 번째 블록 시작 시간은 기존 블록 기준으로 비어 있는 첫 구간
     first_start_str, _ = find_non_overlapping_time(
         existing_blocks=existing_blocks,
@@ -276,8 +387,16 @@ def search_multiple_place_blocks(
     current_start_dt = datetime.combine(today, _parse_time(first_start_str))
     duration = timedelta(minutes=duration_minutes)
 
+    # 같은 쿼리가 반복되는 경우를 추적하여 다른 결과를 가져오기
+    query_count = {}  # 각 쿼리별 사용된 횟수 추적
+
     for q in queries:
-        google_place = call_google_places(q)
+        # 이 쿼리가 몇 번째로 사용되는지 계산
+        result_index = query_count.get(q, 0)
+        query_count[q] = result_index + 1
+
+        # 위치 기반 검색 수행 (같은 쿼리면 다른 인덱스 사용)
+        google_place = call_google_places(q, location=location, result_index=result_index)
         if google_place is None:
             continue
 
