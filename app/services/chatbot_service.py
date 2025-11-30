@@ -52,22 +52,64 @@ def handle_java_chatbot_request(planId, message, systemPromptContext, planContex
             destination=destination
         )
 
-        # 기존 일차가 있으면 TimeTable 생성은 필요한 일차만
+        # 기존 TimeTables에서 날짜->timeTableId 맵 생성 (기존 ID 재사용 목적)
+        existing_timeTables = planContext.get("TimeTables", [])
+        date_to_existing_id = {}
+        for tt in existing_timeTables:
+            try:
+                d = tt.get("date")
+                if isinstance(d, list) and len(d) >= 3:
+                    # [YYYY, M, D] 형태일 경우
+                    d_obj = datetime(d[0], d[1], d[2]).date()
+                    d_str = d_obj.strftime("%Y-%m-%d")
+                else:
+                    d_str = d
+                if d_str and tt.get("timeTableId"):
+                    date_to_existing_id[d_str] = tt.get("timeTableId")
+            except Exception:
+                continue
+
+        # result에서 반환된 timeTables를 순회하며, 날짜가 기존 일정에 있으면 기존 ID를 재사용하고
+        # 없으면 새로 생성하는 액션을 추가합니다.
         timeTable_actions = []
-        if days > existing_days:
-            # 부족한 일차만 생성 (예: 기존 2일차, 요청 3일차 → 3일차만 생성)
-            for i in range(existing_days, days):
-                tt = result["timeTables"][i]
+        for tt_entry in result.get("timeTables", []):
+            # tt_entry는 {"target": {...}} 형태를 기대
+            tt_target = tt_entry.get("target") if isinstance(tt_entry, dict) else None
+            if not tt_target:
+                continue
+
+            tt_date = tt_target.get("date") or tt_entry.get("date")
+            # 날짜 정규화
+            try:
+                if isinstance(tt_date, list) and len(tt_date) >= 3:
+                    tt_date = datetime(tt_date[0], tt_date[1], tt_date[2]).date().strftime("%Y-%m-%d")
+            except Exception:
+                pass
+
+            # 기존 ID가 있으면 재사용(액션 생성 안 함)
+            if tt_date and tt_date in date_to_existing_id:
+                tt_target["timeTableId"] = date_to_existing_id[tt_date]
+            else:
+                # 새 일차가 필요한 경우에만 create 액션 추가
                 timeTable_actions.append(ActionData(
                     action="create",
                     targetName="timeTable",
-                    target=tt["target"]
+                    target=tt_target
                 ))
-            print(f"[AUTO_SCHEDULE] {days - existing_days}개 일차 추가 생성")
 
         # PlaceBlock 생성 액션 (모든 일차의 빈 시간에 추가)
         placeBlock_actions = []
-        for pb in result["placeBlocks"]:
+        for pb in result.get("placeBlocks", []):
+            # pb에 날짜 정보가 있으면 기존 timeTableId로 매핑하여 재사용을 시도
+            try:
+                pb_date = pb.get("date")
+                if isinstance(pb_date, list) and len(pb_date) >= 3:
+                    pb_date = datetime(pb_date[0], pb_date[1], pb_date[2]).date().strftime("%Y-%m-%d")
+                if pb_date and pb_date in date_to_existing_id:
+                    pb["timeTableId"] = date_to_existing_id[pb_date]
+            except Exception:
+                pass
+
             placeBlock_actions.append(ActionData(
                 action="create",
                 targetName="timeTablePlaceBlock",
