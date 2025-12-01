@@ -9,14 +9,15 @@ from app.config import settings
 
 
 DAY_START = time(9, 0, 0)
-DAY_END = time(21, 0, 0)
+DAY_END = time(20, 0, 0)
 
 # 자동 일정 생성 시간대 정의
 AUTO_SCHEDULE_TIMES = {
-    "morning": {"start": time(9, 0, 0), "end": time(11, 0, 0), "type": "관광지"},
-    "lunch": {"start": time(12, 0, 0), "end": time(14, 0, 0), "type": "맛집"},
-    "dinner": {"start": time(18, 0, 0), "end": time(20, 0, 0), "type": "맛집"},
-    "accommodation": {"start": time(21, 0, 0), "end": time(9, 0, 0), "type": "숙소"},
+    "morning": {"start": time(9, 0, 0), "end": time(10, 0, 0), "type": "맛집"},
+    "lunch": {"start": time(12, 0, 0), "end": time(13, 0, 0), "type": "맛집"},
+    "afternoon": {"start": time(14, 0, 0), "end": time(17, 0, 0), "type": "관광지"},
+    "dinner": {"start": time(18, 0, 0), "end": time(19, 0, 0), "type": "맛집"},
+    "accommodation": {"start": time(19, 0, 0), "end": time(20, 0, 0), "type": "숙소"},
 }
 
 

@@ -238,20 +238,24 @@ def create_daily_schedule(
     predefined_slots = {
         "morning": ("09:00:00", "10:00:00"),
         "lunch": ("12:00:00", "13:00:00"),
+        "afternoon": ("14:00:00", "17:00:00"),
         "dinner": ("18:00:00", "19:00:00"),
-        "accommodation": ("21:00:00", "22:00:00"),
+        "accommodation": ("19:00:00", "20:00:00"),
     }
 
-    # 1. 오전 관광지 (09:00-10:00)
+    # 같은 날의 각 시간대마다 다른 검색 결과를 사용하도록 기준 인덱스 설정
+    base_result_index = (day_number - 1) * 4
+
+    # 1. 오전 맛집 (09:00-10:00)
     if not has_time_conflict(existing_blocks, *predefined_slots["morning"]):
         morning_block = create_place_block(
-            query=f"{destination} 관광지",
+            query=f"{destination} 맛집",
             start_time="09:00:00",
             end_time="10:00:00",
             date_str=date_str,
             temp_time_table_id=temp_time_table_id,
             location=location,
-            result_index=day_number - 1,  # 각 날마다 다른 관광지
+            result_index=base_result_index + 0,
         )
         if morning_block:
             blocks.append(morning_block)
@@ -267,14 +271,28 @@ def create_daily_schedule(
             date_str=date_str,
             temp_time_table_id=temp_time_table_id,
             location=location,
-            result_index=day_number - 1,
+            result_index=base_result_index + 1,
         )
         if lunch_block:
             blocks.append(lunch_block)
     else:
         print(f"[AUTO_SCHEDULE] {date_str} 점심 시간대에 기존 일정이 있어 건너뜁니다.")
+    
+    # 3. 오후 관광지 (14:00-17:00)
+    if not has_time_conflict(existing_blocks, *predefined_slots["afternoon"]):
+        afternoon_block = create_place_block(
+            query=f"{destination} 관광지",
+            start_time="14:00:00",
+            end_time="17:00:00",
+            date_str=date_str,
+            temp_time_table_id=temp_time_table_id,
+            location=location,
+            result_index=base_result_index + 2,
+        )
+        if afternoon_block:
+            blocks.append(afternoon_block)
 
-    # 3. 저녁 맛집 (18:00-19:00)
+    # 4. 저녁 맛집 (18:00-19:00)
     if not has_time_conflict(existing_blocks, *predefined_slots["dinner"]):
         dinner_block = create_place_block(
             query=f"{destination} 회 맛집" if day_number % 2 == 0 else f"{destination} 고기 맛집",
@@ -283,20 +301,20 @@ def create_daily_schedule(
             date_str=date_str,
             temp_time_table_id=temp_time_table_id,
             location=location,
-            result_index=day_number - 1,
+            result_index=base_result_index + 3,
         )
         if dinner_block:
             blocks.append(dinner_block)
     else:
         print(f"[AUTO_SCHEDULE] {date_str} 저녁 시간대에 기존 일정이 있어 건너뜁니다.")
 
-    # 4. 숙소 (21:00-22:00) - 마지막 날 제외, 모든 날짜에 같은 숙소 사용
+    # 5. 숙소 (19:00-20:00) - 마지막 날 제외, 모든 날짜에 같은 숙소 사용
     if not is_last_day and accommodation_place:
         if not has_time_conflict(existing_blocks, *predefined_slots["accommodation"]):
             accommodation_block = create_place_block_from_data(
                 place_data=accommodation_place,
-                start_time="21:00:00",
-                end_time="22:00:00",
+                start_time="19:00:00",
+                end_time="20:00:00",
                 date_str=date_str,
                 temp_time_table_id=temp_time_table_id,
             )
