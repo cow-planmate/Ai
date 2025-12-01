@@ -69,16 +69,19 @@ def handle_java_chatbot_request(planId, message, systemPromptContext, planContex
             except Exception:
                 continue
 
+        # 임시 ID -> 날짜 맵 생성 (새로 생성할 TimeTable용)
+        temp_id_to_date = {}
+
         # result에서 반환된 timeTables를 순회하며, 날짜가 기존 일정에 있으면 기존 ID를 재사용하고
         # 없으면 새로 생성하는 액션을 추가합니다.
         timeTable_actions = []
         for tt_entry in result.get("timeTables", []):
-            # tt_entry는 {"target": {...}} 형태를 기대
+            # tt_entry는 {"action": "create", "targetName": "timeTable", "target": {"date": "..."}} 형태
             tt_target = tt_entry.get("target") if isinstance(tt_entry, dict) else None
             if not tt_target:
                 continue
 
-            tt_date = tt_target.get("date") or tt_entry.get("date")
+            tt_date = tt_target.get("date")
             # 날짜 정규화
             try:
                 if isinstance(tt_date, list) and len(tt_date) >= 3:
@@ -88,7 +91,8 @@ def handle_java_chatbot_request(planId, message, systemPromptContext, planContex
 
             # 기존 ID가 있으면 재사용(액션 생성 안 함)
             if tt_date and tt_date in date_to_existing_id:
-                tt_target["timeTableId"] = date_to_existing_id[tt_date]
+                # 기존 TimeTable이 있는 날짜는 생성하지 않음
+                pass
             else:
                 # 새 일차가 필요한 경우에만 create 액션 추가
                 timeTable_actions.append(ActionData(
@@ -100,13 +104,17 @@ def handle_java_chatbot_request(planId, message, systemPromptContext, planContex
         # PlaceBlock 생성 액션 (모든 일차의 빈 시간에 추가)
         placeBlock_actions = []
         for pb in result.get("placeBlocks", []):
-            # pb에 날짜 정보가 있으면 기존 timeTableId로 매핑하여 재사용을 시도
+            # pb에 날짜 정보가 있으면 기존 timeTableId로 매핑하여 재사용
             try:
                 pb_date = pb.get("date")
                 if isinstance(pb_date, list) and len(pb_date) >= 3:
                     pb_date = datetime(pb_date[0], pb_date[1], pb_date[2]).date().strftime("%Y-%m-%d")
+
+                # 기존 TimeTable이 있는 날짜면 기존 ID 사용
                 if pb_date and pb_date in date_to_existing_id:
                     pb["timeTableId"] = date_to_existing_id[pb_date]
+                # 새로 생성할 TimeTable의 날짜면 임시 ID 유지 (이미 pb에 음수 ID가 설정되어 있음)
+                # else: pb["timeTableId"]는 이미 create_auto_schedule에서 설정한 임시 음수 ID
             except Exception:
                 pass
 
