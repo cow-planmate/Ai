@@ -113,8 +113,8 @@ def handle_java_chatbot_request(planId, message, systemPromptContext, planContex
                 # 기존 TimeTable이 있는 날짜면 기존 ID 사용
                 if pb_date and pb_date in date_to_existing_id:
                     pb["timeTableId"] = date_to_existing_id[pb_date]
-                # 새로 생성할 TimeTable의 날짜면 임시 ID 유지 (이미 pb에 음수 ID가 설정되어 있음)
-                # else: pb["timeTableId"]는 이미 create_auto_schedule에서 설정한 임시 음수 ID
+                # 새로 생성할 TimeTable의 날짜면 음수 ID 유지 (백엔드에서 날짜로 매핑)
+                # else: pb["timeTableId"]는 이미 create_auto_schedule에서 설정한 음수 ID
             except Exception:
                 pass
 
@@ -127,14 +127,20 @@ def handle_java_chatbot_request(planId, message, systemPromptContext, planContex
         # 모든 액션 합치기
         all_actions = timeTable_actions + placeBlock_actions
 
-        if existing_days > 0:
-            user_message = f"{nights}박{days}일 {destination} 여행 일정을 완성했어요! 기존 일정에 {len(result['placeBlocks'])}개의 장소를 추가했습니다."
+        # 메시지 생성
+        if len(result['placeBlocks']) == 0:
+            # 장소를 찾지 못한 경우
+            user_message = f"죄송합니다. {destination} 지역의 관광지 및 맛집 정보를 찾을 수 없어요. 😢\n다른 지역명으로 시도하거나, 직접 장소를 추가해주세요!"
+        elif existing_days > 0:
+            # 기존 일정에 추가하는 경우
+            user_message = f"{nights}박{days}일 {destination} 여행 일정을 완성했어요! 기존 일정에 {len(result['placeBlocks'])}개의 장소를 추가했습니다. ✈️"
         else:
-            user_message = f"{nights}박{days}일 {destination} 여행 일정을 만들었어요! 총 {len(result['placeBlocks'])}개의 장소를 추가했습니다."
+            # 새로 일정을 만드는 경우
+            user_message = f"{nights}박{days}일 {destination} 여행 일정을 만들었어요! 총 {len(result['placeBlocks'])}개의 장소를 추가했습니다. 🎉"
 
         return ChatBotActionResponse(
             userMessage=user_message,
-            hasAction=True,
+            hasAction=True if len(all_actions) > 0 else False,
             actions=all_actions
         )
 
