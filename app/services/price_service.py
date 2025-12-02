@@ -304,7 +304,7 @@ def _build_html(daily_summaries: List[DailyCostSummary], trip_summary: TripTotal
             for f in daily.foodDetails:
                 parts.append('<div style="border:1px solid #eef2ff;padding:8px;border-radius:6px;background:#fff">')
                 parts.append(f'<div style="font-weight:600">{esc(f.placeName)}</div>')
-                parts.append(f'<div style="font-size:12px;color:#6b7280">1인당: {esc(f.pricePerPerson)}원 / 총: {esc(f.totalPrice)}원</div>')
+                parts.append(f'<div style="font-size:12px;color:#6b7280">1인당: {esc(f.pricePerPerson)}원 </div>')
                 if getattr(f, 'menuExamples', None):
                     parts.append(f'<div style="font-size:12px;color:#6b7280">메뉴 예시: {esc(", ".join(f.menuExamples))}</div>')
                 if getattr(f, 'placeDescription', None):
