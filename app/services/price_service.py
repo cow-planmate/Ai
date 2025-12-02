@@ -15,8 +15,120 @@ import time
 
 logger = logging.getLogger("uvicorn.error")
 
+DEFAULT_FOOD_PRICE = 15000
+DEFAULT_FOOD_RANGE = (12000, 18000)
+DEFAULT_ACCOM_RANGE = (50000, 100000)
+
+_food_cache: Dict[str, Dict] = {}
+_accom_cache: Dict[str, Dict] = {}
+_summary_cache: Dict[str, str] = {}
+
+
+def _food_cache_key(block: PlaceBlockVO) -> str:
+    return f"food::{block.placeName}::{block.placeAddress}::{block.placeRating}"
+
+
+def _accom_cache_key(block: PlaceBlockVO, headcount: int) -> str:
+    return f"accom::{block.placeName}::{block.placeAddress}::{block.placeRating}::{headcount}"
+
+
+def _summary_cache_key(block: PlaceBlockVO) -> str:
+    return f"summary::{block.placeName}::{block.placeAddress}::{block.placeCategory}::{block.placeTheme}"
+
 def predict_price_service(request: PricePredictionRequest) -> PricePredictionResponse:
     headcount = request.headcount
+
+    food_entries = []
+    food_ref_map: Dict[int, str] = {}
+    food_predictions_map: Dict[int, Dict] = {}
+
+    accom_entries = []
+    accom_ref_map: Dict[int, str] = {}
+    accom_predictions_map: Dict[int, Dict] = {}
+
+    summary_entries = []
+    summary_ref_map: Dict[int, str] = {}
+    summary_predictions_map: Dict[int, Dict] = {}
+    block_lookup: Dict[int, PlaceBlockVO] = {}
+
+    for block in request.placeBlocks:
+        block_lookup[id(block)] = block
+        summary_id = f"summary_{len(summary_entries)}"
+        summary_key = _summary_cache_key(block)
+        cached_summary = _summary_cache.get(summary_key)
+        if cached_summary:
+            summary_predictions_map[id(block)] = {"summary": cached_summary}
+        else:
+            summary_ref_map[id(block)] = summary_id
+            summary_entries.append({
+                "refId": summary_id,
+                "name": block.placeName,
+                "address": block.placeAddress,
+                "category": block.placeCategory,
+                "theme": getattr(block, "placeTheme", None),
+                "rating": block.placeRating,
+            })
+
+        if block.placeCategory == 2:
+            ref = f"food_{len(food_entries)}"
+            food_key = _food_cache_key(block)
+            cached_food = _food_cache.get(food_key)
+            if cached_food:
+                food_predictions_map[id(block)] = cached_food
+            else:
+                food_ref_map[id(block)] = ref
+                food_entries.append({
+                    "refId": ref,
+                    "name": block.placeName,
+                    "address": block.placeAddress,
+                    "rating": block.placeRating,
+                })
+        elif block.placeCategory == 1:
+            ref = f"accom_{len(accom_entries)}"
+            accom_key = _accom_cache_key(block, headcount)
+            cached_accom = _accom_cache.get(accom_key)
+            if cached_accom:
+                accom_predictions_map[id(block)] = cached_accom
+            else:
+                accom_ref_map[id(block)] = ref
+                accom_entries.append({
+                    "refId": ref,
+                    "name": block.placeName,
+                    "address": block.placeAddress,
+                    "rating": block.placeRating,
+                    "headcount": headcount,
+                })
+
+    ai_bundle = _batch_fetch_ai_enrichments(headcount, food_entries, accom_entries, summary_entries)
+    food_predictions = {item.get("refId"): item for item in ai_bundle.get("food", []) if item.get("refId")}
+    accom_predictions = {item.get("refId"): item for item in ai_bundle.get("accommodation", []) if item.get("refId")}
+    summary_predictions = {item.get("refId"): item for item in ai_bundle.get("summaries", []) if item.get("refId")}
+
+    for block_id, ref in food_ref_map.items():
+        data = food_predictions.get(ref)
+        if data:
+            food_predictions_map[block_id] = data
+            block = block_lookup.get(block_id)
+            if block:
+                _food_cache[_food_cache_key(block)] = data
+
+    for block_id, ref in accom_ref_map.items():
+        data = accom_predictions.get(ref)
+        if data:
+            accom_predictions_map[block_id] = data
+            block = block_lookup.get(block_id)
+            if block:
+                _accom_cache[_accom_cache_key(block, headcount)] = data
+
+    for block_id, ref in summary_ref_map.items():
+        data = summary_predictions.get(ref)
+        if data:
+            summary_predictions_map[block_id] = data
+            block = block_lookup.get(block_id)
+            if block:
+                value = data.get("summary", "") if isinstance(data, dict) else ""
+                if value:
+                    _summary_cache[_summary_cache_key(block)] = value
     
     # 1. Timetable ID -> Date 매핑 생성 & 날짜 정렬
     # 예: {144: "2025-11-22", 153: "2025-11-23"}
@@ -57,44 +169,31 @@ def predict_price_service(request: PricePredictionRequest) -> PricePredictionRes
         d_accom_max = 0
         
         for block in blocks:
-            # Generate a short AI description for the place (used in UI)
-            desc = _summarize_place(block)
+            summary_data = summary_predictions_map.get(id(block))
+            desc_value = summary_data.get("summary") if isinstance(summary_data, dict) else None
+            desc = (desc_value or "").strip()
             if desc:
                 place_desc_map[block.placeName] = desc
 
             # 카테고리 2: 식당
             if block.placeCategory == 2:
-                res = _estimate_food_price(block, headcount)
-                
-                # 결과 파싱
-                p_person = res.get("estimatedPrice", 15000)
+                pred = food_predictions_map.get(id(block))
+                p_person = _resolve_food_price(pred)
                 t_price = p_person * headcount
-                
+                menus = pred.get("menuExamples", []) if isinstance(pred, dict) else []
                 d_foods.append(FoodCostDetail(
                     placeName=block.placeName,
                     pricePerPerson=p_person,
                     totalPrice=t_price,
-                    menuExamples=res.get("menuExamples", []),
+                    menuExamples=menus,
                     placeDescription=desc
                 ))
                 d_food_total += t_price
             
             # 카테고리 1: 숙소
             elif block.placeCategory == 1:
-                res = _estimate_accommodation_price(block, headcount)
-                
-                room_type = res.get("recommendedRoomTypeForHeadcount", "기본 객실")
-                room_types = res.get("roomTypes", [])
-                selected = next((r for r in room_types if r["type"] == room_type), None)
-                
-                if not selected and room_types:
-                    selected = room_types[0]
-                    room_type = selected["type"]
-                
-                if selected:
-                    min_p, max_p = selected["priceRange"][0], selected["priceRange"][1]
-                else:
-                    min_p, max_p = 50000, 100000 # Fallback
+                pred = accom_predictions_map.get(id(block))
+                room_type, min_p, max_p = _resolve_accommodation_price(pred, headcount)
 
                 d_accoms.append(AccommodationCostDetail(
                     placeName=block.placeName,
@@ -250,100 +349,100 @@ def _build_html(daily_summaries: List[DailyCostSummary], trip_summary: TripTotal
 
 
 
-# --- AI 호출 헬퍼 함수 (기존 로직 재사용) ---
-
-def _estimate_food_price(block: PlaceBlockVO, headcount: int) -> dict:
-    """Estimate food price using AI. Returns dict with at least 'estimatedPrice' and optional 'menuExamples'.
-    Uses retries and a strict JSON prompt to improve reliability.
-    """
-    if not gemini_model:
-        return {"estimatedPrice": 15000, "menuExamples": []}
-
-    # richer structured prompt asking for price range and examples
-    prompt = f"""
-    아래 정보는 식당에 대한 기본 메타데이터입니다:
-    이름: {block.placeName}
-    주소: {block.placeAddress}
-    평점: {block.placeRating}
-
-    이 식당에서 1인당 평균 식사 비용을 추정해 주세요. 가능한 경우 가격 범위(min, max)와 대표 메뉴 예시도 함께 제공하십시오.
-    반드시 JSON만 출력하세요. 예시 구조:
-    {{
-      "estimatedPrice": 15000,              # 1인당 중간값(정수)
-      "priceRange": [12000, 20000],        # [min, max]
-      "menuExamples": ["메뉴1", "메뉴2"],
-      "confidence": "low|medium|high"
-    }}
-    """
-
-    last_err = None
-    for attempt in range(3):
-        try:
-            response = gemini_model.generate_content(prompt)
-            parsed = _parse_json_response(response.text)
-            if isinstance(parsed, dict) and parsed.get("estimatedPrice") is not None:
-                # normalize fields
-                if "menuExamples" not in parsed:
-                    parsed.setdefault("menuExamples", [])
-                if "priceRange" not in parsed and parsed.get("estimatedPrice") is not None:
-                    p = parsed.get("estimatedPrice")
-                    parsed["priceRange"] = [int(p * 0.8), int(p * 1.2)]
-                return parsed
-        except Exception as e:
-            last_err = e
-            logger.warning(f"Food price attempt {attempt+1} failed for {block.placeName}: {e}")
-            time.sleep(0.6 * (attempt + 1))
-
-    logger.error(f"Food prediction failed for {block.placeName}: {last_err}")
-    return {"estimatedPrice": 15000, "priceRange": [12000, 18000], "menuExamples": []}
-
-def _estimate_accommodation_price(block: PlaceBlockVO, headcount: int) -> dict:
-    """Estimate accommodation pricing and room types via AI.
-    Returns dict matching expected structure: recommendedRoomTypeForHeadcount, roomTypes (list of {type, priceRange}).
-    Uses retries and fallback values on failure.
-    """
+def _batch_fetch_ai_enrichments(headcount: int, food_items: List[Dict], accommodation_items: List[Dict], summary_items: List[Dict]) -> Dict:
     if not gemini_model:
         return {}
+    if not (food_items or accommodation_items or summary_items):
+        return {}
+
+    food_json = json.dumps(food_items, ensure_ascii=False, indent=2)
+    accom_json = json.dumps(accommodation_items, ensure_ascii=False, indent=2)
+    summary_json = json.dumps(summary_items, ensure_ascii=False, indent=2)
 
     prompt = f"""
-    아래는 숙소의 기본 정보입니다:
-    이름: {block.placeName}
-    주소: {block.placeAddress}
-    평점: {block.placeRating}
-    여행 인원: {headcount}
+    당신은 여행 비용과 장소 요약을 한 번에 계산하는 전문 AI입니다. 입력은 여러 장소의 메타데이터이며, 반드시 JSON만 출력해야 합니다.
 
-    이 정보를 바탕으로 해당 숙소에서 {headcount}명에게 적합한 객실 유형과 각 객실 유형의 1박당 가격 범위를 (min, max)으로 추정해 주세요.
-    반드시 JSON만 출력하세요. 예시 구조:
+    - 여행 인원수(headcount): {headcount}
+    - FOOD_ITEMS: {food_json}
+    - ACCOMMODATION_ITEMS: {accom_json}
+    - SUMMARY_ITEMS: {summary_json}
+
+    출력 JSON 스키마 (필요한 배열만 포함):
     {{
-      "recommendedRoomTypeForHeadcount": "더블룸",
-      "roomTypes": [
-         {{"type": "싱글룸", "priceRange": [50000, 70000]}},
-         {{"type": "더블룸", "priceRange": [80000, 120000]}}
+      "food": [
+        {{
+          "refId": "food_0",
+          "estimatedPrice": 15000,
+          "priceRange": [12000, 20000],
+          "menuExamples": ["대표메뉴1", "대표메뉴2"]
+        }}
       ],
-      "confidence": "low|medium|high"
+      "accommodation": [
+        {{
+          "refId": "accom_0",
+          "recommendedRoomType": "패밀리룸",
+          "roomTypes": [
+            {{"type": "패밀리룸", "priceRange": [90000, 140000]}},
+            {{"type": "스탠다드룸", "priceRange": [60000, 90000]}}
+          ]
+        }}
+      ],
+      "summaries": [
+        {{
+          "refId": "summary_0",
+          "summary": "1-2문장으로 된 장소 설명"
+        }}
+      ]
     }}
+
+    refId는 반드시 입력과 동일하게 반환하세요. 숫자는 정수로 표기하고, 정보가 없으면 해당 refId를 생략하세요.
     """
 
-    last_err = None
-    for attempt in range(3):
-        try:
-            response = gemini_model.generate_content(prompt)
-            parsed = _parse_json_response(response.text)
-            if isinstance(parsed, dict) and parsed.get("roomTypes"):
-                return parsed
-        except Exception as e:
-            last_err = e
-            logger.warning(f"Accommodation attempt {attempt+1} failed for {block.placeName}: {e}")
-            time.sleep(0.6 * (attempt + 1))
+    try:
+        response = gemini_model.generate_content(prompt)
+        parsed = _parse_json_response(response.text)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception as e:
+        logger.error(f"Batch Gemini call failed: {e}")
+        return {}
 
-    logger.error(f"Accommodation prediction failed for {block.placeName}: {last_err}")
-    # Fallback: provide a generic roomTypes suggestion
-    return {
-        "recommendedRoomTypeForHeadcount": "스탠다드룸",
-        "roomTypes": [
-            {"type": "스탠다드룸", "priceRange": [50000, 100000]},
-        ]
-    }
+
+def _resolve_food_price(pred: Dict) -> int:
+    if isinstance(pred, dict):
+        try:
+            value = int(pred.get("estimatedPrice", DEFAULT_FOOD_PRICE))
+            return value if value > 0 else DEFAULT_FOOD_PRICE
+        except (TypeError, ValueError):
+            return DEFAULT_FOOD_PRICE
+    return DEFAULT_FOOD_PRICE
+
+
+def _resolve_accommodation_price(pred: Dict, headcount: int):
+    room_type = "기본 객실"
+    min_p, max_p = DEFAULT_ACCOM_RANGE
+
+    if isinstance(pred, dict):
+        room_type = pred.get("recommendedRoomType") or pred.get("recommendedRoomTypeForHeadcount") or room_type
+        room_types = pred.get("roomTypes") or []
+        selected = None
+        for entry in room_types:
+            if entry.get("type") == room_type:
+                selected = entry
+                break
+        if not selected and room_types:
+            selected = room_types[0]
+            room_type = selected.get("type", room_type)
+        if selected:
+            price_range = selected.get("priceRange") or selected.get("price_range")
+            if isinstance(price_range, list) and len(price_range) == 2:
+                try:
+                    min_p = int(price_range[0])
+                    max_p = int(price_range[1])
+                except (TypeError, ValueError):
+                    min_p, max_p = DEFAULT_ACCOM_RANGE
+
+    return room_type, min_p, max_p
+
 
 def _parse_json_response(text: str) -> dict:
     try:
